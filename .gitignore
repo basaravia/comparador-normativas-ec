@@ -1,0 +1,15 @@
+# macOS
+.DS_Store
+.AppleDouble
+
+# Jupyter
+.ipynb_checkpoints/
+*.pyc
+__pycache__/
+
+# Docling native JSONs (2-2.5 MB cada uno, regenerables)
+output/docling/*_docling.json
+
+# Entornos locales
+.env
+*.log
