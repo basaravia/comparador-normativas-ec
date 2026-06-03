@@ -13,3 +13,4 @@ output/docling/*_docling.json
 # Entornos locales
 .env
 *.log
+.claude/
