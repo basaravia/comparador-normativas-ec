@@ -14,3 +14,4 @@ output/docling/*_docling.json
 .env
 *.log
 .claude/
+document_test
