@@ -1,4 +1,4 @@
-name: puce-tesis
+name: normas-comparador
 channels:
   - conda-forge
   - defaults

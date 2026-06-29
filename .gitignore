@@ -15,6 +15,7 @@ output/docling/*_docling.json
 *.log
 .claude/
 document_test
+.venv_*
 
 # Políticas corporativas (documentos confidenciales - NO subir)
 output/rag_index/*.md
