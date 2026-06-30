@@ -15,4 +15,10 @@ output/docling/*_docling.json
 *.log
 .claude/
 document_test
+.venv_*
 
+# Políticas corporativas (documentos confidenciales - NO subir)
+output/rag_index/*.md
+output/rag_index/*.faiss
+output/rag_index/chunks_metadata.json
+output/markitdown/*POL*.md
