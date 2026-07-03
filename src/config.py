@@ -43,9 +43,11 @@ DOCLING_MAX_TOKENS: int = 512  # max tokens por chunk HybridChunker
 # ── Parámetros LLM ────────────────────────────────────────────────────────
 LLM_TEMPERATURE: float = 0.0
 # gemma4 genera reasoning interno antes de la respuesta → necesita tokens extra
-LLM_MAX_TOKENS: int = 8192   # para análisis comparativo (thinking + JSON)
-LLM_GRADER_MAX_TOKENS: int = 4096  # para grading (thinking + JSON corto)
+LLM_MAX_TOKENS: int = 4096   # M1 16GB: limita cadena CoT de gemma4 (antes 8192)
+LLM_GRADER_MAX_TOKENS: int = 2048  # grading simple: suficiente con 2k tokens
 
 # ── Concurrencia ──────────────────────────────────────────────────────────
-MAX_WORKERS: int = 4          # hilos simultáneos para llamadas LLM
+# M1 16GB: DMR procesa gemma4 secuencialmente; max_workers>1 no aporta speedup
+# y añade presión de memoria con múltiples requests en cola simultáneos
+MAX_WORKERS: int = 1          # hilos simultáneos para llamadas LLM
 EMBED_BATCH_SIZE: int = 32    # textos por lote en encode()

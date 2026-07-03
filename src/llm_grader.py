@@ -179,6 +179,8 @@ class LLMGrader:
             api_key="ignored",
             temperature=temperature,
             max_tokens=LLM_GRADER_MAX_TOKENS,
+            timeout=120,   # gemma4 CoT puede tardar; 2 min es suficiente para grading
+            max_retries=0,
         )
         self._llm_analyst = ChatOpenAI(
             model=model,
@@ -186,6 +188,8 @@ class LLMGrader:
             api_key="ignored",
             temperature=temperature,
             max_tokens=LLM_MAX_TOKENS,
+            timeout=180,   # análisis comparativo puede requerir más tokens de razonamiento
+            max_retries=0,
         )
         self._build_chains()
 

@@ -16,8 +16,8 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
-import faiss
 
+# faiss se importa lazy (en build/load) para evitar conflicto de libs nativas con Docling
 from .embeddings import EmbeddingBackend
 from .config import (
     DMR_BASE_URL,
@@ -64,7 +64,7 @@ class NormativaIndex:
     ) -> None:
         self._backend = embedding_backend
         self._use_reranker = use_reranker
-        self._index: Optional[faiss.IndexFlatIP] = None
+        self._index = None  # faiss.IndexFlatIP, lazy-loaded
         self._df: Optional[pd.DataFrame] = None
 
     # ── Construcción del índice ───────────────────────────────────────────
@@ -78,6 +78,7 @@ class NormativaIndex:
         logger.info("Construyendo índice FAISS sobre %d elementos…", len(normativa_df))
         texts = normativa_df[text_col].fillna("").tolist()
 
+        import faiss
         vecs = self._backend.encode(texts, prefix="")
         dim = vecs.shape[1]
 
@@ -88,6 +89,7 @@ class NormativaIndex:
 
     def save(self, path: str | Path) -> None:
         """Persiste el índice FAISS y los metadatos del DataFrame."""
+        import faiss
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
         faiss.write_index(self._index, str(path / "index.faiss"))
@@ -96,6 +98,7 @@ class NormativaIndex:
 
     def load(self, path: str | Path) -> None:
         """Carga índice FAISS y metadatos desde disco."""
+        import faiss
         path = Path(path)
         self._index = faiss.read_index(str(path / "index.faiss"))
         self._df = pd.read_json(path / "normativa_meta.json", orient="records")
