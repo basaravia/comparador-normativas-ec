@@ -1,0 +1,40 @@
+# ── Document parsing ─────────────────────────────────────────────────────────
+# Docling: extracción PDF con LayoutML, OCR y HybridChunker
+docling==2.55.1
+ocrmac>=1.0.1                   # OCR nativo macOS (Vision framework) — Apple Silicon only
+
+# ── LangChain + Docker Model Runner ──────────────────────────────────────────
+langchain==0.3.27
+langchain-core==0.3.79
+langchain-openai==0.3.35        # ChatOpenAI + OpenAIEmbeddings → apunta a DMR
+langchain-docling==1.1.0        # HybridChunker de Docling integrado en LangChain
+langchain-text-splitters==0.3.11
+openai==1.109.1                 # cliente base usado por langchain-openai
+httpx>=0.27.0                   # cliente HTTP para llamadas al reranker DMR
+
+# ── Vector search ─────────────────────────────────────────────────────────────
+faiss-cpu==1.14.2               # IndexFlatIP para búsqueda coseno; no hay faiss-gpu en Apple Silicon
+
+# ── ML / embeddings ───────────────────────────────────────────────────────────
+# torch: necesario para los modelos internos de Docling (TableFormer, layout)
+# En Apple Silicon instala automáticamente con soporte MPS (Metal Performance Shaders)
+torch>=2.5.0
+torchvision>=0.20.0
+transformers>=4.50.0
+sentence-transformers>=3.0.0    # backend alternativo de embeddings local
+
+# ── Data / Export ─────────────────────────────────────────────────────────────
+pandas>=2.0.0
+numpy>=2.0.0
+openpyxl>=3.1.0                 # exportación a Excel (.xlsx)
+pillow>=10.0.0                  # procesamiento de imágenes (Docling OCR)
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+tqdm>=4.66.0
+pydantic>=2.10.0
+python-dotenv>=1.0.0
+
+# ── Jupyter ───────────────────────────────────────────────────────────────────
+ipykernel>=6.29.0
+ipywidgets>=8.1.0
+nbconvert>=7.16.0
