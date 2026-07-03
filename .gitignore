@@ -22,3 +22,8 @@ output/rag_index/*.md
 output/rag_index/*.faiss
 output/rag_index/chunks_metadata.json
 output/markitdown/*POL*.md
+
+# Artefactos generados por el pipeline (regenerables, no commitar)
+output/comparador/
+output/**/*.xlsx
+output/**/*.pdf
