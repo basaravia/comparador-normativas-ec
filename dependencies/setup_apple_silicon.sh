@@ -65,9 +65,10 @@ ok "Kernel Jupyter '$ENV_NAME' registrado"
 # ─── 4. Verificar Docling + OCR ──────────────────────────────────────────────
 step "Verificando Docling"
 python -c "
-import docling, ocrmac
-print(f'  docling  : {docling.__version__}')
-print(f'  ocrmac   : {ocrmac.__version__}')
+from importlib.metadata import version
+import docling, ocrmac  # noqa: F401 (valida que importen sin error)
+print(f'  docling  : {version(\"docling\")}')
+print(f'  ocrmac   : {version(\"ocrmac\")}')
 import torch
 mps_ok = torch.backends.mps.is_available()
 print(f'  PyTorch  : {torch.__version__} | MPS disponible: {mps_ok}')
