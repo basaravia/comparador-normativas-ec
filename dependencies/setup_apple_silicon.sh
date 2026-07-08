@@ -6,9 +6,8 @@
 # =============================================================================
 set -euo pipefail
 
-ENV_NAME="puce-tesis"
-PYTHON_VERSION="3.13.5"
-DMR_BASE_URL="http://localhost:12434/engines/llb/v1"
+ENV_NAME="normas_comparador"
+DMR_BASE_URL="http://localhost:12434/engines/v1"
 
 # Colores
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
@@ -41,37 +40,29 @@ if ! command -v conda &>/dev/null; then
 fi
 ok "Conda $(conda --version)"
 
-# ─── 3. Entorno conda ────────────────────────────────────────────────────────
-step "Configurando entorno conda '$ENV_NAME' con Python $PYTHON_VERSION"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-if conda env list | grep -q "^$ENV_NAME"; then
-    warn "Entorno '$ENV_NAME' ya existe — omitiendo creación"
+# ─── 3. Entorno conda (creado directo desde environment.yml) ─────────────────
+step "Configurando entorno conda '$ENV_NAME' desde environment.yml"
+
+source "$(conda info --base)/etc/profile.d/conda.sh"
+
+if conda env list | grep -q "^$ENV_NAME "; then
+    warn "Entorno '$ENV_NAME' ya existe — actualizando dependencias"
+    conda env update -n "$ENV_NAME" -f "$SCRIPT_DIR/environment.yml" --prune
 else
-    conda create -n "$ENV_NAME" python="$PYTHON_VERSION" -y
+    conda env create -f "$SCRIPT_DIR/environment.yml"
     ok "Entorno '$ENV_NAME' creado"
 fi
 
-# Activar entorno (funciona tanto en conda como en miniconda)
-source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "$ENV_NAME"
 ok "Entorno activado: $(python --version)"
 
-# ─── 4. Dependencias pip ─────────────────────────────────────────────────────
-step "Instalando dependencias Python"
+# Registrar el kernel de Jupyter con el mismo nombre del entorno
+python -m ipykernel install --user --name "$ENV_NAME" --display-name "$ENV_NAME"
+ok "Kernel Jupyter '$ENV_NAME' registrado"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# PyTorch primero: pip oficial incluye soporte MPS para Apple Silicon
-pip install --upgrade pip
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-# Nota: el índice /cpu también incluye los wheels para MPS en macOS arm64
-
-# Resto de dependencias del proyecto
-pip install -r "$SCRIPT_DIR/requirements.txt"
-
-ok "Dependencias instaladas"
-
-# ─── 5. Verificar Docling + OCR ──────────────────────────────────────────────
+# ─── 4. Verificar Docling + OCR ──────────────────────────────────────────────
 step "Verificando Docling"
 python -c "
 import docling, ocrmac
@@ -83,7 +74,7 @@ print(f'  PyTorch  : {torch.__version__} | MPS disponible: {mps_ok}')
 "
 ok "Docling y OCR verificados"
 
-# ─── 6. Docker Desktop + Docker Model Runner ─────────────────────────────────
+# ─── 5. Docker Desktop + Docker Model Runner ─────────────────────────────────
 step "Verificando Docker Desktop"
 
 if ! command -v docker &>/dev/null; then
@@ -108,12 +99,12 @@ if ! curl -sf --max-time 5 "$DMR_BASE_URL/models" &>/dev/null; then
     echo "  1. Docker Desktop está corriendo"
     echo "  2. Model Runner está habilitado en Settings → Features in development"
     echo ""
-    echo "  Luego re-ejecuta: bash setup_apple_silicon.sh"
+    echo "  Luego re-ejecuta: bash dependencies/setup_apple_silicon.sh"
     exit 1
 fi
 ok "Docker Model Runner activo"
 
-# ─── 7. Descargar modelos DMR ────────────────────────────────────────────────
+# ─── 6. Descargar modelos DMR ────────────────────────────────────────────────
 step "Descargando modelos Docker Model Runner"
 
 # Función: descarga solo si el modelo no está ya cargado
@@ -138,7 +129,7 @@ pull_model "ai/gemma4:latest" "gemma4 (4.74 GB, requiere ~5 GB GPU RAM)"
 # Reranker post-FAISS (1.19 GB)
 pull_model "ai/qwen3-reranker-vllm:0.6B" "qwen3-reranker-vllm 0.6B (1.19 GB)"
 
-# ─── 8. Test rápido end-to-end ───────────────────────────────────────────────
+# ─── 7. Test rápido end-to-end ───────────────────────────────────────────────
 step "Test rápido de conectividad"
 
 python -c "

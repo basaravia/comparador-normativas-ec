@@ -80,7 +80,8 @@ respecto a normativas ecuatorianas (SBS, BCE, SEPS, UAF, Asamblea Nacional).
 ```text
 compara_docs/
 ├── master.ipynb                  ← notebook principal (5 fases)
-├── environment.yml               ← dependencias conda
+├── environment.yml               ← freeze completo del entorno de desarrollo (no usar para replicar)
+├── dependencies/                 ← entorno reproducible (Apple Silicon 16GB): environment.yml, setup_apple_silicon.sh
 ├── Normativa2026/                ← PDFs de normativas ecuatorianas
 │   ├── PDL-DERECHOS-DIGITALES.pdf
 │   ├── LEY-ORGANICA-PARA-EL-FORTALECIMIENTO-DE-LA-CIBERSEGURIDAD_*.pdf
