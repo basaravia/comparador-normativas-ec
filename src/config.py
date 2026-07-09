@@ -13,7 +13,13 @@ LLM (análisis comparativo):
   - docker.io/ai/smollm2-vllm:1.7B  → Solo pruebas (muy pequeño para análisis legal)
 
 RERANKER:
-  - docker.io/ai/qwen3-reranker-vllm:0.6B → Reranking semántico post-FAISS (Phase 2b)
+  - docker.io/ai/qwen3-reranker-vllm:0.6B (DMR) → NO usar en Apple Silicon: el
+    backend vllm-metal responde "reranking mode not supported by vllm-metal
+    backend" (confirmado en /engines/vllm/rerank). En su lugar se carga el
+    mismo modelo directo con sentence-transformers (ver RERANKER_MODEL):
+    Qwen/Qwen3-Reranker-0.6B tiene un bug de NaN en MPS con el kernel de
+    atención SDPA — search_engine.py fuerza attn_implementation="eager"
+    + dtype=float32 cuando corre en GPU (MPS) para evitarlo.
 """
 
 # ── Docker Model Runner ────────────────────────────────────────────────────
@@ -29,8 +35,11 @@ DMR_EMBED_DIM: int = 2560  # cambiar si se usa granite (768)
 DMR_LLM_MODEL: str = "docker.io/ai/gemma4:latest"
 DMR_LLM_FALLBACK: str = "docker.io/ai/smollm2-vllm:1.7B"  # solo para pruebas
 
-# Reranker para filtrado post-FAISS (Phase 2b)
-DMR_RERANKER_MODEL: str = "docker.io/ai/qwen3-reranker-vllm:0.6B"
+# Reranker local para filtrado post-FAISS (Phase 2b) — CrossEncoder vía
+# sentence-transformers; multilingüe, ~1.2GB. Corre en MPS (con workaround
+# de precisión, ver NormativaIndex.__init__) o CPU si no hay MPS disponible.
+# (DMR/vllm-metal no soporta reranking mode en Apple Silicon)
+RERANKER_MODEL: str = "Qwen/Qwen3-Reranker-0.6B"
 
 # ── Parámetros de búsqueda ─────────────────────────────────────────────────
 FAISS_TOP_K: int = 5          # candidatos iniciales del índice FAISS

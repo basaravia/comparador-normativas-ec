@@ -3,7 +3,7 @@
 NormativaIndex:
   - build()           → construye índice FAISS sobre artículos de la normativa
   - semantic_search() → Top-K por similitud coseno (IndexFlatIP + L2-norm)
-  - rerank()          → reordena candidatos via DMR qwen3-reranker (optional)
+  - rerank()          → reordena candidatos con CrossEncoder local (optional)
   - lexical_scan()    → detecta referencias explícitas a artículos normativos
 """
 from __future__ import annotations
@@ -20,9 +20,8 @@ import pandas as pd
 # faiss se importa lazy (en build/load) para evitar conflicto de libs nativas con Docling
 from .embeddings import EmbeddingBackend
 from .config import (
-    DMR_BASE_URL,
-    DMR_RERANKER_MODEL,
     FAISS_TOP_K,
+    RERANKER_MODEL,
     RERANKER_TOP_N,
     MIN_SEMANTIC_SCORE,
 )
@@ -50,7 +49,7 @@ class NormativaIndex:
         # Búsqueda semántica
         results = index.semantic_search("política de crédito", top_k=5)
 
-        # Reranking opcional con DMR qwen3-reranker
+        # Reranking opcional con CrossEncoder local
         results = index.rerank("política de crédito", results, top_n=3)
 
         # Escaneo léxico
@@ -61,11 +60,29 @@ class NormativaIndex:
         self,
         embedding_backend: EmbeddingBackend,
         use_reranker: bool = True,
+        reranker_model: str = RERANKER_MODEL,
     ) -> None:
         self._backend = embedding_backend
         self._use_reranker = use_reranker
         self._index = None  # faiss.IndexFlatIP, lazy-loaded
         self._df: Optional[pd.DataFrame] = None
+        self._cross_encoder = None
+
+        if use_reranker:
+            # DMR/vllm-metal no soporta reranking mode en Apple Silicon —
+            # se usa un CrossEncoder local (sentence-transformers) en su lugar.
+            import torch
+            from sentence_transformers import CrossEncoder
+
+            device = "mps" if torch.backends.mps.is_available() else "cpu"
+            model_kwargs = {"dtype": torch.float32}
+            if device == "mps":
+                # Qwen3-Reranker produce NaN en MPS con el kernel de atención
+                # optimizado (SDPA); "eager" evita ese bug de precisión.
+                model_kwargs["attn_implementation"] = "eager"
+
+            logger.info("Cargando reranker local: %s (device=%s)", reranker_model, device)
+            self._cross_encoder = CrossEncoder(reranker_model, device=device, model_kwargs=model_kwargs)
 
     # ── Construcción del índice ───────────────────────────────────────────
 
@@ -140,10 +157,7 @@ class NormativaIndex:
         candidates: list[dict],
         top_n: int = RERANKER_TOP_N,
     ) -> list[dict]:
-        """Reordena candidatos FAISS con el modelo qwen3-reranker (vía DMR).
-
-        Si el endpoint no está disponible, ordena por similitud FAISS y retorna top_n.
-        """
+        """Reordena candidatos FAISS con un CrossEncoder local."""
         if not candidates:
             return []
 
@@ -156,10 +170,7 @@ class NormativaIndex:
             for c in candidates
         ]
 
-        scores = self._call_reranker(query, documents, top_n)
-        if scores is None:
-            logger.debug("Reranker no disponible, usando orden FAISS")
-            return candidates[:top_n]
+        scores = self._call_reranker(query, documents)
 
         ranked = sorted(zip(scores, candidates), key=lambda x: x[0], reverse=True)
         result = []
@@ -167,34 +178,10 @@ class NormativaIndex:
             result.append({**cand, "reranker_score": round(float(score), 4), "rank": rank})
         return result
 
-    def _call_reranker(
-        self, query: str, documents: list[str], top_n: int
-    ) -> Optional[list[float]]:
-        """Llama al endpoint de reranking de DMR. Retorna None si falla."""
-        import httpx
-        payload = {
-            "model": DMR_RERANKER_MODEL,
-            "query": query,
-            "documents": documents,
-            "top_n": top_n,
-        }
-        try:
-            resp = httpx.post(
-                f"{DMR_BASE_URL.rstrip('/')}/rerank",
-                json=payload,
-                timeout=30.0,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            # Formato Cohere-compatible: [{"index": i, "relevance_score": f}, ...]
-            if "results" in data:
-                scores = [0.0] * len(documents)
-                for r in data["results"]:
-                    scores[r["index"]] = r["relevance_score"]
-                return scores
-        except Exception as e:
-            logger.debug("Reranker error: %s", e)
-        return None
+    def _call_reranker(self, query: str, documents: list[str]) -> list[float]:
+        """Puntúa cada documento contra la query con el CrossEncoder local."""
+        pairs = [(query, doc) for doc in documents]
+        return [float(s) for s in self._cross_encoder.predict(pairs)]
 
     # ── Escaneo léxico ───────────────────────────────────────────────────
 
