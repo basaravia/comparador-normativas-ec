@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import pandas as pd
 from tqdm import tqdm
@@ -59,19 +59,24 @@ class DocumentComparator:
         normativa_df: pd.DataFrame,
         max_workers: int = MAX_WORKERS,
         desc: str = "Comparando secciones del manual",
+        progress_callback: Optional[Callable[[int, int, dict], None]] = None,
     ) -> pd.DataFrame:
         """Ejecuta el pipeline completo con procesamiento concurrente via ThreadPoolExecutor.
 
         Parámetros:
-            manual_df   : DataFrame de secciones del manual (salida de ManualParser)
-            normativa_df: DataFrame de artículos de la normativa (salida de NormativaParser)
-            max_workers : Hilos simultáneos para llamadas LLM
-            desc        : Descripción para la barra de progreso tqdm
+            manual_df         : DataFrame de secciones del manual (salida de ManualParser)
+            normativa_df      : DataFrame de artículos de la normativa (salida de NormativaParser)
+            max_workers       : Hilos simultáneos para llamadas LLM
+            desc              : Descripción para la barra de progreso tqdm
+            progress_callback : Si se provee, se invoca tras cada fila completada con
+                                 (completadas, total, resultado_fila) — útil para reportar
+                                 avance a una UI (p.ej. Streamlit) sin depender de tqdm.
 
         Retorna DataFrame del manual enriquecido con columnas de análisis.
         """
         rows = manual_df.to_dict("records")
         results: dict[int, dict] = {}
+        total = len(rows)
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {
@@ -79,7 +84,7 @@ class DocumentComparator:
                 for i, row in enumerate(rows)
             }
             with tqdm(total=len(futures), desc=desc, unit="sección", colour="cyan") as pbar:
-                for future in as_completed(futures):
+                for completed, future in enumerate(as_completed(futures), start=1):
                     idx = futures[future]
                     try:
                         results[idx] = future.result()
@@ -87,6 +92,8 @@ class DocumentComparator:
                         logger.error("Error en fila %d: %s", idx, e)
                         results[idx] = {**rows[idx], **self._empty_result()}
                     pbar.update(1)
+                    if progress_callback is not None:
+                        progress_callback(completed, total, results[idx])
 
         return pd.DataFrame([results[i] for i in range(len(rows))])
 

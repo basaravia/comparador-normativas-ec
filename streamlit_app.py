@@ -1,0 +1,472 @@
+"""App Streamlit — Comparador de Normativas vs Manuales Internos ([REDACTADO]).
+
+Envuelve el pipeline de 5 fases de ``src/`` (el mismo usado en
+``master.ipynb``): tabulación (Docling) → índice FAISS + léxico →
+reranking (CrossEncoder) → grading + análisis comparativo (LLM vía Docker
+Model Runner) → exportación. La barra lateral expone los parámetros de los
+modelos fundacionales (embeddings, LLM, reranker, umbrales de búsqueda).
+
+Ejecutar con:  streamlit run streamlit_app.py
+"""
+from __future__ import annotations
+
+import logging
+import os
+import time
+from pathlib import Path
+
+# Apple Silicon 16GB: evita el crash nativo del kernel cuando faiss y el
+# runtime OpenMP de Docling/torch coexisten en el mismo proceso — mismo
+# workaround que master.ipynb, debe fijarse antes de importar esas libs.
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
+import altair as alt
+import pandas as pd
+import streamlit as st
+
+from app.logging_utils import clear_log_lines, get_log_lines, save_run_log, setup_logging
+from app.theme import NIVEL_COLORS, inject_theme, render_header
+from src import (
+    DocumentComparator,
+    LangChainDMREmbeddings,
+    LLMGrader,
+    ManualParser,
+    NormativaIndex,
+    NormativaParser,
+    SentenceTransformersEmbeddings,
+)
+from src import config as cfg
+
+logger = logging.getLogger("app")
+
+NORMATIVA_DIR = Path("Normativa2026")
+MANUAL_DIR = Path("document_test")
+OUTPUT_DIR = Path("output/comparador")
+UPLOAD_NORMATIVA_DIR = Path("output/uploads/normativas")
+UPLOAD_MANUAL_DIR = Path("output/uploads/manuales")
+NIVEL_ORDER = ["cumple", "parcial", "omision", "no_aplica"]
+
+inject_theme()
+setup_logging()
+render_header(
+    "Análisis de cumplimiento normativo (SBS · BCE · SEPS · UAF) sobre manuales internos"
+)
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Barra lateral — configuración de modelos fundacionales
+# ──────────────────────────────────────────────────────────────────────────
+
+@st.cache_data(ttl=15, show_spinner=False)
+def _check_dmr(base_url: str) -> bool:
+    import httpx
+
+    try:
+        r = httpx.get(f"{base_url}/models", timeout=1.5)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
+def _sidebar_config() -> dict:
+    st.sidebar.markdown("## ⚙️ Modelos fundacionales")
+
+    if st.sidebar.button("↺ Restaurar valores por defecto", width="stretch"):
+        for key in list(st.session_state.keys()):
+            if key.startswith("cfg_"):
+                del st.session_state[key]
+        st.rerun()
+
+    st.sidebar.markdown("#### Conexión")
+    dmr_base_url = st.sidebar.text_input("DMR base URL", value=cfg.DMR_BASE_URL, key="cfg_dmr_url")
+    dmr_ok = _check_dmr(dmr_base_url)
+    st.sidebar.caption("🟢 DMR conectado" if dmr_ok else "🔴 DMR no responde (verifica Docker Model Runner)")
+
+    st.sidebar.markdown("#### Embeddings")
+    embed_backend_kind = st.sidebar.radio(
+        "Backend de embeddings",
+        ["Docker Model Runner", "Local (sentence-transformers)"],
+        key="cfg_embed_backend",
+    )
+    embed_model = st.sidebar.selectbox(
+        "Modelo de embedding",
+        options=["ai/granite-embedding-multilingual:latest", "ai/qwen3-embedding:latest", "Personalizado…"],
+        index=0,
+        key="cfg_embed_model_select",
+        disabled=embed_backend_kind != "Docker Model Runner",
+    )
+    if embed_model == "Personalizado…":
+        embed_model = st.sidebar.text_input(
+            "Modelo de embedding (custom)", value=cfg.DMR_EMBED_MODEL, key="cfg_embed_model_custom"
+        )
+    embed_batch_size = st.sidebar.number_input(
+        "Batch size", min_value=1, max_value=128, value=cfg.EMBED_BATCH_SIZE, key="cfg_embed_batch"
+    )
+
+    st.sidebar.markdown("#### LLM (grading + análisis)")
+    llm_model = st.sidebar.selectbox(
+        "Modelo LLM",
+        options=[cfg.DMR_LLM_MODEL, cfg.DMR_LLM_FALLBACK, "Personalizado…"],
+        index=0,
+        key="cfg_llm_model_select",
+    )
+    if llm_model == "Personalizado…":
+        llm_model = st.sidebar.text_input("Modelo LLM (custom)", value=cfg.DMR_LLM_MODEL, key="cfg_llm_model_custom")
+    temperature = st.sidebar.slider("Temperatura", 0.0, 1.0, cfg.LLM_TEMPERATURE, 0.05, key="cfg_temperature")
+    llm_max_tokens = st.sidebar.number_input(
+        "Max tokens (análisis)", min_value=512, max_value=16384, value=cfg.LLM_MAX_TOKENS, step=256, key="cfg_llm_max_tokens"
+    )
+    grader_max_tokens = st.sidebar.number_input(
+        "Max tokens (grading)", min_value=256, max_value=8192, value=cfg.LLM_GRADER_MAX_TOKENS, step=256, key="cfg_grader_max_tokens"
+    )
+
+    st.sidebar.markdown("#### Búsqueda + reranking")
+    use_reranker = st.sidebar.checkbox("Usar reranker (CrossEncoder local)", value=True, key="cfg_use_reranker")
+    reranker_model = st.sidebar.text_input(
+        "Modelo reranker", value=cfg.RERANKER_MODEL, key="cfg_reranker_model", disabled=not use_reranker
+    )
+    faiss_top_k = st.sidebar.slider("FAISS top-k", 1, 20, cfg.FAISS_TOP_K, key="cfg_faiss_top_k")
+    reranker_top_n = st.sidebar.slider("Reranker top-n", 1, 20, cfg.RERANKER_TOP_N, key="cfg_reranker_top_n")
+    min_semantic_score = st.sidebar.slider(
+        "Score semántico mínimo", 0.0, 1.0, cfg.MIN_SEMANTIC_SCORE, 0.01, key="cfg_min_score"
+    )
+
+    st.sidebar.markdown("#### Procesamiento")
+    device = st.sidebar.selectbox("Device (Docling)", ["cpu", "auto", "mps", "cuda"], index=0, key="cfg_device")
+    st.sidebar.caption(
+        "⚠️ MPS puede causar segfault al convertir manuales sin caché en Apple Silicon "
+        "(ver hardening en el historial del proyecto). Usa 'cpu' salvo que sepas que es estable."
+    )
+    do_ocr = st.sidebar.checkbox("OCR nativo (documentos escaneados)", value=True, key="cfg_do_ocr")
+    docling_max_tokens = st.sidebar.number_input(
+        "Max tokens por chunk (manual)", min_value=128, max_value=2048, value=cfg.DOCLING_MAX_TOKENS, step=64, key="cfg_docling_max_tokens"
+    )
+    max_workers = st.sidebar.number_input(
+        "Hilos concurrentes (LLM)", min_value=1, max_value=8, value=cfg.MAX_WORKERS, key="cfg_max_workers"
+    )
+
+    return dict(
+        dmr_base_url=dmr_base_url,
+        dmr_ok=dmr_ok,
+        embed_backend_kind=embed_backend_kind,
+        embed_model=embed_model,
+        embed_batch_size=int(embed_batch_size),
+        llm_model=llm_model,
+        temperature=temperature,
+        llm_max_tokens=int(llm_max_tokens),
+        grader_max_tokens=int(grader_max_tokens),
+        use_reranker=use_reranker,
+        reranker_model=reranker_model,
+        faiss_top_k=int(faiss_top_k),
+        reranker_top_n=min(int(reranker_top_n), int(faiss_top_k)),
+        min_semantic_score=min_semantic_score,
+        device=device,
+        do_ocr=do_ocr,
+        docling_max_tokens=int(docling_max_tokens),
+        max_workers=int(max_workers),
+    )
+
+
+config = _sidebar_config()
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Helpers de carga de documentos
+# ──────────────────────────────────────────────────────────────────────────
+
+def _pdf_picker(label: str, existing_dir: Path, upload_dir: Path, key: str, exclude_prefix: str = "") -> list[Path]:
+    existing = sorted(existing_dir.glob("*.pdf")) if existing_dir.exists() else []
+    default = [p for p in existing if not (exclude_prefix and p.name.startswith(exclude_prefix))]
+
+    selected = st.multiselect(
+        f"{label} existentes en `{existing_dir}/`",
+        options=existing,
+        default=default,
+        format_func=lambda p: p.name,
+        key=f"{key}_existing",
+    )
+    if exclude_prefix and len(default) < len(existing):
+        st.caption(
+            f"Los PDFs `{exclude_prefix}*` no vienen preseleccionados: no tienen caché Docling "
+            "y su conversión en vivo ha causado segfault en Apple Silicon."
+        )
+
+    uploaded = st.file_uploader(f"Subir nuevo(s) PDF de {label.lower()}", type=["pdf"], accept_multiple_files=True, key=f"{key}_upload")
+    saved_paths: list[Path] = list(selected)
+    if uploaded:
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        for f in uploaded:
+            dest = upload_dir / f.name
+            dest.write_bytes(f.getbuffer())
+            if dest not in saved_paths:
+                saved_paths.append(dest)
+            logger.info("Archivo subido: %s (%d bytes)", dest, dest.stat().st_size)
+    return saved_paths
+
+
+def _build_embedding_backend(config: dict):
+    if config["embed_backend_kind"] == "Docker Model Runner":
+        logger.info("Backend de embeddings: DMR / %s", config["embed_model"])
+        return LangChainDMREmbeddings(
+            model=config["embed_model"], base_url=config["dmr_base_url"], batch_size=config["embed_batch_size"]
+        )
+    logger.info("Backend de embeddings: sentence-transformers local (device=%s)", config["device"])
+    return SentenceTransformersEmbeddings(device=config["device"], batch_size=config["embed_batch_size"])
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Pestañas principales
+# ──────────────────────────────────────────────────────────────────────────
+
+tab_docs, tab_index, tab_compare, tab_results = st.tabs(
+    ["📄 1. Documentos", "🧭 2. Índice", "⚡ 3. Comparación", "📊 4. Resultados"]
+)
+
+with tab_docs:
+    st.subheader("Carga y tabulación de documentos")
+    col_norm, col_man = st.columns(2)
+    with col_norm:
+        st.markdown("**Normativa(s)**")
+        normativa_files = _pdf_picker("Normativa", NORMATIVA_DIR, UPLOAD_NORMATIVA_DIR, "normativa", exclude_prefix="L1-XVI")
+    with col_man:
+        st.markdown("**Manual(es) interno(s)**")
+        manual_files = _pdf_picker("Manual", MANUAL_DIR, UPLOAD_MANUAL_DIR, "manual")
+
+    if st.button(
+        "📑 Tabular documentos", type="primary", disabled=not (normativa_files and manual_files), width="stretch"
+    ):
+        with st.status("Tabulando documentos…", expanded=True) as status:
+            t0 = time.time()
+            logger.info(
+                "Iniciando tabulación: %d normativa(s), %d manual(es) — device=%s, ocr=%s",
+                len(normativa_files), len(manual_files), config["device"], config["do_ocr"],
+            )
+
+            normativa_parser = NormativaParser(device=config["device"], do_ocr=config["do_ocr"], cache_dir="output/docling")
+            frames = []
+            for pdf in normativa_files:
+                st.write(f"Parseando normativa: `{pdf.name}`")
+                df = normativa_parser.parse_pdf(pdf)
+                frames.append(df)
+                logger.info("Normativa %s: %d elementos", pdf.name, len(df))
+            normativa_df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+            manual_parser = ManualParser(max_tokens=config["docling_max_tokens"], device=config["device"])
+            mframes = []
+            for pdf in manual_files:
+                st.write(f"Parseando manual: `{pdf.name}`")
+                df = manual_parser.parse_pdf(pdf)
+                mframes.append(df)
+                logger.info("Manual %s: %d chunks", pdf.name, len(df))
+            manual_df = pd.concat(mframes, ignore_index=True) if mframes else pd.DataFrame()
+
+            st.session_state["normativa_df"] = normativa_df
+            st.session_state["manual_df"] = manual_df
+            for key in ("normativa_index", "results_df", "excel_bytes", "json_bytes"):
+                st.session_state.pop(key, None)
+
+            elapsed = time.time() - t0
+            logger.info(
+                "Tabulación completa en %.1fs: %d elementos normativos, %d secciones de manual",
+                elapsed, len(normativa_df), len(manual_df),
+            )
+            status.update(label=f"Tabulación completa ({elapsed:.1f}s)", state="complete")
+
+    if "normativa_df" in st.session_state:
+        n_df, m_df = st.session_state["normativa_df"], st.session_state["manual_df"]
+        st.success(f"Normativa: {len(n_df)} elementos · Manual: {len(m_df)} secciones")
+        c1, c2 = st.columns(2)
+        c1.dataframe(n_df.head(20), width="stretch", height=250)
+        c2.dataframe(m_df.head(20), width="stretch", height=250)
+
+with tab_index:
+    st.subheader("Índice semántico FAISS")
+    docs_ready = "normativa_df" in st.session_state and not st.session_state["normativa_df"].empty
+    if not docs_ready:
+        st.info("Tabula primero los documentos en la pestaña **1. Documentos**.")
+    else:
+        if st.button("🧭 Construir índice FAISS", type="primary"):
+            with st.status("Construyendo índice…", expanded=True) as status:
+                t0 = time.time()
+                backend = _build_embedding_backend(config)
+                index = NormativaIndex(
+                    embedding_backend=backend, use_reranker=config["use_reranker"], reranker_model=config["reranker_model"]
+                )
+                st.write("Indexando artículos normativos…")
+                index.build(st.session_state["normativa_df"], text_col="embed_text")
+
+                st.session_state["normativa_index"] = index
+                st.session_state["embed_backend"] = backend
+                elapsed = time.time() - t0
+                logger.info("Índice FAISS listo en %.1fs (%d elementos)", elapsed, len(st.session_state["normativa_df"]))
+                status.update(label=f"Índice listo ({elapsed:.1f}s)", state="complete")
+
+        if "normativa_index" in st.session_state:
+            st.success("Índice FAISS construido.")
+            if st.button("💾 Persistir índice en `output/comparador/faiss_index/`"):
+                st.session_state["normativa_index"].save(OUTPUT_DIR / "faiss_index")
+                logger.info("Índice guardado en %s", OUTPUT_DIR / "faiss_index")
+                st.toast("Índice guardado")
+
+            st.markdown("#### Probar búsqueda semántica")
+            query = st.text_input("Consulta de prueba", value="política de crédito y evaluación de riesgo crediticio")
+            if query:
+                results = st.session_state["normativa_index"].semantic_search(
+                    query, top_k=config["faiss_top_k"], min_score=config["min_semantic_score"]
+                )
+                results = st.session_state["normativa_index"].rerank(query, results, top_n=config["reranker_top_n"])
+                if not results:
+                    st.warning("Sin resultados por encima del score mínimo configurado.")
+                for r in results:
+                    score = r.get("reranker_score", r.get("similarity"))
+                    st.write(f"**Art. {r.get('numero', '?')}** — {r.get('encabezado', '')[:90]}  ·  score={score}")
+
+with tab_compare:
+    st.subheader("Comparación normativa vs manual")
+    index_ready = "normativa_index" in st.session_state
+    if not index_ready:
+        st.info("Construye el índice en la pestaña **2. Índice** antes de comparar.")
+    else:
+        if not config["dmr_ok"] and config["embed_backend_kind"] == "Docker Model Runner":
+            st.warning("DMR no responde en la URL configurada; la comparación fallará al llamar al LLM.")
+
+        manual_df = st.session_state["manual_df"]
+        mode = st.radio("Modo de ejecución", ["Muestra rápida", "Pipeline completo"], horizontal=True, key="cfg_run_mode")
+        n_sample = None
+        if mode == "Muestra rápida":
+            n_sample = st.number_input(
+                "Número de secciones a analizar", min_value=1, max_value=len(manual_df),
+                value=min(5, len(manual_df)), key="cfg_sample_n",
+            )
+        else:
+            st.warning(
+                f"⚠️ El pipeline completo procesa las {len(manual_df)} secciones del manual. "
+                "En hardware M1 16GB cada sección puede tardar ~2–4 min (razonamiento CoT del LLM) — "
+                "puede tomar varias horas."
+            )
+
+        run_clicked = st.button("🚀 Ejecutar comparación", type="primary")
+        progress_bar = st.progress(0.0, text="En espera…")
+        log_box = st.empty()
+
+        if run_clicked:
+            clear_log_lines()
+            selected_manual_df = (
+                manual_df.sample(int(n_sample), random_state=42) if mode == "Muestra rápida" else manual_df
+            )
+            total = len(selected_manual_df)
+
+            grader = LLMGrader(
+                model=config["llm_model"],
+                base_url=config["dmr_base_url"],
+                temperature=config["temperature"],
+                max_tokens=config["llm_max_tokens"],
+                grader_max_tokens=config["grader_max_tokens"],
+            )
+            comparator = DocumentComparator(
+                normativa_index=st.session_state["normativa_index"],
+                llm_grader=grader,
+                top_k_faiss=config["faiss_top_k"],
+                top_n_rerank=config["reranker_top_n"],
+            )
+            st.session_state["comparator"] = comparator
+
+            def _on_progress(done: int, total_: int, row: dict) -> None:
+                label = str(row.get("jerarquia") or row.get("titulo_seccion") or "")[:60]
+                progress_bar.progress(done / total_, text=f"{done}/{total_} secciones · última: {label}")
+                log_box.code("\n".join(get_log_lines()[-12:]) or "…", language="text")
+
+            t0 = time.time()
+            logger.info("Iniciando comparación (%s, %d secciones, %d hilos)", mode, total, config["max_workers"])
+            try:
+                results_df = comparator.run(
+                    manual_df=selected_manual_df,
+                    normativa_df=st.session_state["normativa_df"],
+                    max_workers=config["max_workers"],
+                    desc=mode,
+                    progress_callback=_on_progress,
+                )
+                st.session_state["results_df"] = results_df
+
+                excel_path = comparator.export_excel(results_df, OUTPUT_DIR / "reporte_comparacion.xlsx")
+                st.session_state["excel_bytes"] = excel_path.read_bytes()
+                st.session_state["excel_name"] = excel_path.name
+                st.session_state["json_bytes"] = results_df.to_json(
+                    orient="records", force_ascii=False, indent=2
+                ).encode("utf-8")
+
+                elapsed = time.time() - t0
+                logger.info("Comparación completa en %.1fs: %d secciones analizadas", elapsed, len(results_df))
+                progress_bar.progress(1.0, text=f"✅ Completado en {elapsed:.1f}s")
+            except Exception as e:
+                logger.error("Comparación interrumpida: %s", e)
+                st.error(f"Error durante la comparación: {e}")
+            finally:
+                log_path = save_run_log()
+                st.success(f"Log de esta ejecución guardado en `{log_path}`")
+
+        if get_log_lines():
+            with st.expander("📜 Registro de ejecución", expanded=False):
+                st.code("\n".join(get_log_lines()), language="text")
+
+with tab_results:
+    st.subheader("Resultados")
+    if "results_df" not in st.session_state:
+        st.info("Ejecuta una comparación en la pestaña **3. Comparación** para ver resultados.")
+    else:
+        results_df = st.session_state["results_df"]
+
+        counts = results_df["nivel_cumplimiento"].value_counts()
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("✅ Cumple", int(counts.get("cumple", 0)))
+        m2.metric("🟡 Parcial", int(counts.get("parcial", 0)))
+        m3.metric("🔴 Omisión", int(counts.get("omision", 0)))
+        m4.metric("⚪ No aplica", int(counts.get("no_aplica", 0)))
+
+        chart_df = counts.reindex(NIVEL_ORDER, fill_value=0).rename_axis("nivel").reset_index(name="secciones")
+        color_scale = alt.Scale(domain=NIVEL_ORDER, range=[NIVEL_COLORS[k]["fg"] for k in NIVEL_ORDER])
+        base = alt.Chart(chart_df).encode(
+            x=alt.X("nivel:N", sort=NIVEL_ORDER, title=None, axis=alt.Axis(labelAngle=0)),
+            y=alt.Y("secciones:Q", title="Secciones"),
+        )
+        bars = base.mark_bar(size=48, cornerRadiusTopLeft=4, cornerRadiusTopRight=4).encode(
+            color=alt.Color("nivel:N", scale=color_scale, legend=None),
+            tooltip=["nivel", "secciones"],
+        )
+        labels = base.mark_text(dy=-8, fontWeight="bold").encode(text="secciones:Q")
+        st.altair_chart((bars + labels).properties(height=280), width="stretch")
+
+        st.markdown("#### Detalle por sección")
+        niveles_filtro = st.multiselect("Filtrar por nivel de cumplimiento", NIVEL_ORDER, default=NIVEL_ORDER)
+        display_cols = [
+            c for c in ["jerarquia", "titulo_seccion", "tipo_coincidencia", "nivel_cumplimiento", "analisis_general"]
+            if c in results_df.columns
+        ]
+        filtered = results_df[results_df["nivel_cumplimiento"].isin(niveles_filtro)]
+
+        def _row_style(row: pd.Series) -> list[str]:
+            bg = NIVEL_COLORS.get(row["nivel_cumplimiento"], {}).get("bg", "")
+            return [f"background-color: {bg}"] * len(row)
+
+        st.dataframe(
+            filtered[display_cols].style.apply(_row_style, axis=1), width="stretch", height=420
+        )
+
+        st.markdown("#### Exportar")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            if "excel_bytes" in st.session_state:
+                st.download_button(
+                    "⬇️ Reporte Excel", data=st.session_state["excel_bytes"],
+                    file_name=st.session_state["excel_name"],
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+        with c2:
+            if "json_bytes" in st.session_state:
+                st.download_button(
+                    "⬇️ Reporte JSON", data=st.session_state["json_bytes"],
+                    file_name="reporte_comparacion.json", mime="application/json",
+                )
+        with c3:
+            log_text = "\n".join(get_log_lines())
+            st.download_button("⬇️ Log de sesión", data=log_text.encode("utf-8"), file_name="sesion.log", mime="text/plain")

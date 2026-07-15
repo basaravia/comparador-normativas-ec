@@ -5,6 +5,26 @@ respecto a normativas ecuatorianas (SBS, BCE, SEPS, UAF, Asamblea Nacional).
 
 ---
 
+## Interfaz Streamlit
+
+`streamlit_app.py` (rama `feature/streamlit-ui`) expone el mismo pipeline de
+`master.ipynb` como app web: carga/selección de PDFs de normativa y manual,
+configuración en la barra lateral de los modelos fundacionales (embeddings,
+LLM, reranker, umbrales de búsqueda — parámetros centralizados en
+`src/config.py`), ejecución con progreso en vivo y dashboard de resultados.
+
+```bash
+conda run -n puce-tesis pip install -r dependencies/requirements.txt   # instala streamlit
+conda run -n puce-tesis streamlit run streamlit_app.py
+```
+
+Requiere Docker Model Runner corriendo en `localhost:12434` (o la URL que se
+configure en la barra lateral) para los pasos de embeddings/LLM. Los logs de
+cada ejecución se imprimen en la terminal donde corre `streamlit run` y se
+guardan al finalizar en `output/logs/run_<timestamp>.log`.
+
+---
+
 ## Arquitectura del pipeline
 
 ```text

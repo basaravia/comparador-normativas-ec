@@ -27,3 +27,7 @@ output/markitdown/*POL*.md
 output/comparador/
 output/**/*.xlsx
 output/**/*.pdf
+
+# PDFs subidos desde la app Streamlit y logs de ejecución con estampa de tiempo
+output/uploads/
+output/logs/

@@ -162,9 +162,11 @@ class LLMGrader:
     normativas bancarias ecuatorianas contra manuales internos.
 
     Parámetros:
-        model       : ID del modelo en DMR (default: docker.io/ai/gemma4:latest)
-        base_url    : Endpoint DMR (default: http://localhost:12434/engines/v1)
-        temperature : 0.0 para respuestas deterministas (recomendado)
+        model             : ID del modelo en DMR (default: docker.io/ai/gemma4:latest)
+        base_url          : Endpoint DMR (default: http://localhost:12434/engines/v1)
+        temperature       : 0.0 para respuestas deterministas (recomendado)
+        max_tokens        : Presupuesto de tokens del análisis comparativo (default: LLM_MAX_TOKENS)
+        grader_max_tokens : Presupuesto de tokens del grading de candidatos (default: LLM_GRADER_MAX_TOKENS)
     """
 
     def __init__(
@@ -172,13 +174,15 @@ class LLMGrader:
         model: str = DMR_LLM_MODEL,
         base_url: str = DMR_BASE_URL,
         temperature: float = LLM_TEMPERATURE,
+        max_tokens: int = LLM_MAX_TOKENS,
+        grader_max_tokens: int = LLM_GRADER_MAX_TOKENS,
     ) -> None:
         self._llm_grader = ChatOpenAI(
             model=model,
             base_url=base_url,
             api_key="ignored",
             temperature=temperature,
-            max_tokens=LLM_GRADER_MAX_TOKENS,
+            max_tokens=grader_max_tokens,
             timeout=120,   # gemma4 CoT puede tardar; 2 min es suficiente para grading
             max_retries=0,
         )
@@ -187,7 +191,7 @@ class LLMGrader:
             base_url=base_url,
             api_key="ignored",
             temperature=temperature,
-            max_tokens=LLM_MAX_TOKENS,
+            max_tokens=max_tokens,
             timeout=180,   # análisis comparativo puede requerir más tokens de razonamiento
             max_retries=0,
         )
