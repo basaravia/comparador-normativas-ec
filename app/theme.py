@@ -1,12 +1,18 @@
-"""Configuración de página y estilo visual — línea corporativa [REDACTADO].
+"""Configuración de página y estilo visual — línea corporativa de la entidad.
 
 No se pudo acceder al manual de marca oficial (brandfetch bloqueó la
 petición y no había sesión de navegador disponible), así que la paleta es un
 placeholder deliberadamente aislado en ``_PALETTE``: naranja corporativo +
 azul marino, look bancario limpio. Si se cuenta con la guía de marca real,
 basta con actualizar los valores hex de abajo.
+
+El nombre de la entidad no se escribe en el código: sale de ``ORG_DISPLAY_NAME``
+(vía ``.env``, que está en .gitignore). Sin esa variable la app arranca con un
+título genérico, de modo que el repositorio no identifica al cliente.
 """
 from __future__ import annotations
+
+import os
 
 import streamlit as st
 
@@ -37,10 +43,20 @@ NIVEL_COLORS = {
 }
 
 
+_BASE_TITLE = "Comparador Normativo"
+
+
+def page_title() -> str:
+    """Título de la página. Se le añade el nombre de la entidad solo si está
+    configurado en el entorno; en un clon limpio del repo queda el genérico."""
+    org = os.getenv("ORG_DISPLAY_NAME", "").strip()
+    return f"{_BASE_TITLE} — {org}" if org else _BASE_TITLE
+
+
 def inject_theme() -> None:
     """Configura la página y aplica el CSS corporativo. Llamar una sola vez, primero."""
     st.set_page_config(
-        page_title="Comparador Normativo — [REDACTADO]",
+        page_title=page_title(),
         page_icon="🏦",
         layout="wide",
         initial_sidebar_state="expanded",

@@ -14,9 +14,11 @@ de la ejecución en output/logs/.
 
 Documentos elegidos (ver notas del proyecto):
   - PDL-DERECHOS-DIGITALES.pdf: normativa con caché Docling (tabulación
-    ~instantánea, 44 elementos).
-  - [REDACTADO] …V2.pdf: manual más pequeño de document_test/, conversión
-    Docling en vivo pero acotada (~1 min en este hardware).
+    ~instantánea, 44 elementos). Es normativa pública, se nombra literal.
+  - El manual más pequeño de document_test/, resuelto en runtime por tamaño de
+    archivo: conversión Docling en vivo pero acotada (~1 min en este hardware).
+    Se resuelve dinámicamente a propósito — los códigos de las políticas
+    internas son material confidencial y no deben aparecer en el repositorio.
 
 Tiempos observados en este entorno (Apple M1 16GB, gemma4 vía DMR): tabulación
 ~1 min, índice FAISS ~15s, comparación de 1 sección ~3-5 min (grading +
@@ -30,6 +32,7 @@ Se excluye del run por defecto vía el marcador ``e2e``:
 from __future__ import annotations
 
 import time
+import unicodedata
 from pathlib import Path
 
 import httpx
@@ -41,7 +44,24 @@ from src import config as cfg
 pytestmark = pytest.mark.e2e
 
 LOG_DIR = Path("output/logs")
+MANUAL_DIR = Path("document_test")
 NIVELES_VALIDOS = {"cumple", "parcial", "omision", "no_aplica"}
+
+
+def _nfc(value) -> str:
+    """macOS almacena los nombres de document_test/ en NFD; un literal fuente
+    viene en NFC y no matchearía. Normalizar ambos lados resuelve el desajuste."""
+    return unicodedata.normalize("NFC", str(value))
+
+
+def _smallest_manual_stem() -> str:
+    """Stem del PDF más pequeño de document_test/ — el manual más barato de
+    convertir con Docling. Se descubre en runtime en vez de codificarlo: el
+    nombre del documento interno es confidencial."""
+    pdfs = sorted(MANUAL_DIR.glob("*.pdf"), key=lambda p: p.stat().st_size)
+    if not pdfs:
+        pytest.skip(f"{MANUAL_DIR}/ no contiene PDFs para usar como manual")
+    return pdfs[0].stem
 
 
 def _dmr_available() -> bool:
@@ -84,17 +104,18 @@ def test_full_comparison_flow_end_to_end(app_path: str):
     _assert_no_exception(at, "render inicial")
 
     # ── Tab 1: seleccionar documentos y tabular ───────────────────────────
-    # Selección por substring ASCII de las opciones reales del widget, no
-    # por literal Python con tildes: en macOS los nombres de document_test/
-    # están normalizados en NFD y un literal fuente (NFC) no matchea.
+    # Selección sobre las opciones reales del widget, normalizando Unicode en
+    # ambos lados (ver _nfc): en macOS los nombres de document_test/ están en
+    # NFD y un literal fuente (NFC) no matchearía.
     norm_ms = at.multiselect(key="normativa_existing")
     norm_choice = [o for o in norm_ms.options if "PDL-DERECHOS" in str(o)]
     assert norm_choice, f"PDL-DERECHOS-DIGITALES.pdf no está en las opciones: {norm_ms.options}"
     norm_ms.set_value(norm_choice)
 
+    man_stem = _smallest_manual_stem()
     man_ms = at.multiselect(key="manual_existing")
-    man_choice = [o for o in man_ms.options if "[REDACTADO]" in str(o)]
-    assert man_choice, f"[REDACTADO] no está en las opciones: {man_ms.options}"
+    man_choice = [o for o in man_ms.options if _nfc(man_stem) in _nfc(o)]
+    assert man_choice, f"el manual más pequeño de {MANUAL_DIR}/ no está en las opciones"
     man_ms.set_value(man_choice)
 
     at.run(timeout=60)

@@ -1,4 +1,4 @@
-"""App Streamlit — Comparador de Normativas vs Manuales Internos ([REDACTADO]).
+"""App Streamlit — Comparador de Normativas vs Manuales Internos.
 
 Envuelve el pipeline de 5 fases de ``src/`` (el mismo usado en
 ``master.ipynb``): tabulación (Docling) → índice FAISS + léxico →

@@ -7,6 +7,10 @@
 *.pyc
 __pycache__/
 
+# R
+.Rhistory
+.Rproj.user/
+
 # Docling native JSONs (2-2.5 MB cada uno, regenerables)
 output/docling/*_docling.json
 
@@ -22,6 +26,12 @@ output/rag_index/*.md
 output/rag_index/*.faiss
 output/rag_index/chunks_metadata.json
 output/markitdown/*POL*.md
+output/docling/*POL*.md
+
+# Planes de trabajo internos: citan al cliente, rutas de documentos internos y
+# hallazgos de auditoría. Se versionan aparte, no en el repo público.
+PLAN_*.md
+Informe_*.docx
 
 # Artefactos generados por el pipeline (regenerables, no commitar)
 output/comparador/

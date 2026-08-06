@@ -296,6 +296,16 @@ Dependencias principales:
 
 > **Sin red / datos móviles:** el pipeline completo de Fase 1 corre offline. Las fases 2–5 requieren Docker Model Runner local (no red externa).
 
+### Variables de entorno
+
+| Variable | Default | Rol |
+| --- | --- | --- |
+| `ORG_DISPLAY_NAME` | *(vacío)* | Nombre de la entidad en el título de la app. Sin definir, la UI muestra solo "Comparador Normativo". |
+
+Se leen del entorno o de un `.env` local, que está en `.gitignore`. El nombre de
+la entidad y las rutas a sus documentos internos no se escriben en el código: el
+repositorio no debe identificar al cliente.
+
 ---
 
 ## Ejecución rápida
