@@ -28,10 +28,17 @@ output/rag_index/chunks_metadata.json
 output/markitdown/*POL*.md
 output/docling/*POL*.md
 
-# Planes de trabajo internos: citan al cliente, rutas de documentos internos y
-# hallazgos de auditoría. Se versionan aparte, no en el repo público.
+# Planes de trabajo internos: por defecto NO se versionan, porque suelen citar
+# al cliente, rutas de documentos internos y hallazgos de auditoría.
 PLAN_*.md
 Informe_*.docx
+
+# Excepción revisada: este plan se escaneó con las 4 categorías del denylist sin
+# hallazgos; solo contiene referencias genéricas ("el banco", "manuales
+# internos"). Autorizado a publicar el 2026-08-11.
+# Cualquier PLAN_*.md nuevo sigue ignorado por defecto — la excepción es
+# deliberada y por archivo, no una apertura del patrón.
+!PLAN_MEJORAS_ANEXO.md
 
 # Artefactos generados por el pipeline (regenerables, no commitar)
 output/comparador/
