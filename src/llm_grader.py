@@ -21,7 +21,6 @@ from typing import Any, Literal, Optional
 
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
 from .config import (
@@ -230,23 +229,26 @@ class LLMGrader:
             )
 
         else:
-            self._llm_grader = ChatOpenAI(
-                model=model,
+            # La firma clásica (model/base_url/…) se conserva porque `master.ipynb`
+            # llama así (S5), pero ya NO construye el cliente aquí: arma un ProviderSpec
+            # y se lo pide a las fábricas. Antes este bloque instanciaba `ChatOpenAI`
+            # directamente, y era el camino que usaba la app — de modo que la costura de
+            # P-a existía sin que nada de producción pasara por ella.
+            from .providers import Provider, ProviderSpec, build_chat_model
+
+            base = ProviderSpec(
+                proveedor=Provider.DMR,
+                modelo=model,
                 base_url=base_url,
-                api_key="ignored",
                 temperature=temperature,
-                max_tokens=grader_max_tokens,
-                timeout=120,   # gemma4 CoT puede tardar; 2 min es suficiente para grading
-                max_retries=0,
             )
-            self._llm_analyst = ChatOpenAI(
-                model=model,
-                base_url=base_url,
-                api_key="ignored",
-                temperature=temperature,
-                max_tokens=max_tokens,
-                timeout=180,   # el análisis puede requerir más tokens de razonamiento
-                max_retries=0,
+            # Timeouts distintos y calibrados: el grading responde corto (2 min basta) y
+            # el análisis genera razonamiento largo antes del JSON.
+            self._llm_grader = build_chat_model(
+                replace(base, max_tokens=grader_max_tokens, timeout_s=120)
+            )
+            self._llm_analyst = build_chat_model(
+                replace(base, max_tokens=max_tokens, timeout_s=180)
             )
 
         self._build_chains()
@@ -429,13 +431,22 @@ class LLMGrader:
         manual_text = manual_row.get("texto", manual_row.get("contenido", ""))
         jerarquia = manual_row.get("jerarquia", manual_row.get("seccion", ""))
 
-        has_lexical = bool(lexical_matches)
+        # Solo las citas inequívocas cuentan como coincidencia léxica.
+        #
+        # Una cita ambigua ("Art. 5" cuando ese número existe en dos normativas) llega
+        # etiquetada desde `lexical_scan`, pero antes se contaba igual que una firme:
+        # `tipo_coincidencia` salía "lexica" y `_build_referencias` la imprimía al prompt
+        # bajo "COINCIDENCIAS LÉXICAS" sin mención de la ambigüedad. Para el modelo, el
+        # comportamiento era indistinguible del defecto que se corrigió.
+        lexicos_firmes = [m for m in lexical_matches if m.get("match_type") != "ambiguo"]
+        lexicos_ambiguos = [m for m in lexical_matches if m.get("match_type") == "ambiguo"]
+        has_lexical = bool(lexicos_firmes)
         relevant = [c for c in validated_candidates if c.get("relevante", True)]
         has_semantic = bool(relevant)
 
         tipo = "lexica" if has_lexical else ("semantica" if has_semantic else "ninguna")
 
-        referencias = self._build_referencias(lexical_matches, relevant)
+        referencias = self._build_referencias(lexicos_firmes, relevant, lexicos_ambiguos)
         instruccion = {
             "lexica": "Basa el análisis en las coincidencias léxicas (artículos referenciados directamente). "
                       "Compara punto a punto la normativa vs el manual.",
@@ -492,6 +503,7 @@ class LLMGrader:
     def _build_referencias(
         lexical: list[dict],
         semantic: list[dict],
+        ambiguos: list[dict] | None = None,
     ) -> str:
         parts = []
         if lexical:
@@ -508,6 +520,22 @@ class LLMGrader:
                 for i, c in enumerate(semantic[:3])
             )
             parts.append(f"CANDIDATOS SEMÁNTICOS VALIDADOS:\n{sem_text}")
+        if ambiguos:
+            # Se le dan al modelo, pero declarados como lo que son. Ocultarlos perdería
+            # una cita que el manual sí hace; presentarlos como firmes afirmaría una
+            # correspondencia que el texto no respalda.
+            amb_text = "\n".join(
+                f"Art.{m.get('numero','?')} de {m.get('doc_id','?')}: "
+                f"{m.get('encabezado','')}"
+                for m in ambiguos[:5]
+            )
+            parts.append(
+                "CITAS AMBIGUAS (el manual menciona el número de artículo pero no la "
+                "normativa; ese número existe en varias de las cargadas). NO las trates "
+                "como referencia confirmada: úsalas solo como indicio y dilo en el "
+                f"análisis si te apoyas en alguna.\n{amb_text}"
+            )
+
         if not parts:
             parts.append("Sin artículos normativos relevantes identificados.")
         return "\n\n".join(parts)

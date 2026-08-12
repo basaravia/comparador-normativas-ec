@@ -16,12 +16,27 @@ from pathlib import Path
 
 import streamlit as st
 
+from src.settings import redact
+
 _FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 _DATEFMT = "%H:%M:%S"
 _LOG_DIR = Path("output/logs")
 _SESSION_KEY = "_log_buffer"
 
 _handlers_attached = False  # global de proceso, no de sesión
+
+
+class _RedactingFormatter(logging.Formatter):
+    """Formatter que enmascara credenciales antes de que la línea exista.
+
+    Va en el formatter y no en cada `logger.info(...)`: confiar en que quien escribe se
+    acuerde de redactar es garantizar que algún día no se acuerde. Aquí pasa todo lo que
+    se registre, venga de donde venga — incluida la salida a consola y el archivo de
+    `output/logs/`, que es lo que exige §14 ("ninguna credencial aparece en logs").
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        return redact(super().format(record))
 
 
 class _StreamlitBufferHandler(logging.Handler):
@@ -48,7 +63,7 @@ def setup_logging(level: int = logging.INFO) -> None:
 
     root = logging.getLogger()
     root.setLevel(level)
-    formatter = logging.Formatter(_FORMAT, datefmt=_DATEFMT)
+    formatter = _RedactingFormatter(_FORMAT, datefmt=_DATEFMT)
 
     console = logging.StreamHandler(sys.stdout)
     console.setFormatter(formatter)

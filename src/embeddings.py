@@ -136,16 +136,16 @@ class LangChainDMREmbeddings(EmbeddingBackend):
         api_key: str = "ignored",
         batch_size: int = EMBED_BATCH_SIZE,
     ) -> None:
-        from langchain_openai import OpenAIEmbeddings
+        # El cliente lo construye providers.py, no esta clase. Antes se instanciaba
+        # `OpenAIEmbeddings` aquí, de modo que la costura existía sin que el camino real
+        # pasara por ella — el DoD de P-a decía justo lo contrario.
+        from .providers import construir_embeddings_openai
 
         self._model = model
         self.nombre_modelo = model
         self._batch_size = batch_size
-        self._embedder = OpenAIEmbeddings(
-            model=model,
-            base_url=base_url,
-            api_key=api_key,
-            check_embedding_ctx_length=False,
+        self._embedder = construir_embeddings_openai(
+            model=model, base_url=base_url, api_key=api_key,
         )
         self._dim: int | None = None
 
@@ -195,10 +195,10 @@ class SentenceTransformersEmbeddings(EmbeddingBackend):
         device: str = "auto",
         batch_size: int = EMBED_BATCH_SIZE,
     ) -> None:
-        from sentence_transformers import SentenceTransformer
+        from .providers import construir_sentence_transformer
 
         _device = self._resolve_device(device)
-        self._model = SentenceTransformer(model_name, device=_device)
+        self._model = construir_sentence_transformer(model_name=model_name, device=_device)
         self._batch_size = batch_size
         # El identificador del modelo, como string. `_model` es el objeto cargado, no su
         # nombre, y `index_meta.json` necesita algo serializable para poder rechazar

@@ -163,19 +163,37 @@ class TestPrefijosDeEmbedding:
 class TestElMotorNoConstruyeClientes:
     """La propiedad que hace barata la Fase 3."""
 
-    def test_solo_providers_instancia_chatopenai(self):
-        """Si otro módulo vuelve a construir su cliente, la costura deja de servir."""
+    def test_solo_providers_instancia_clientes_de_modelo(self):
+        """Si otro módulo vuelve a construir su cliente, la costura deja de servir.
+
+        La primera versión de esta prueba **excluía `llm_grader.py`**, que era el único
+        módulo que lo hacía, y solo buscaba `ChatOpenAI`. Estaba construida alrededor de
+        la excepción que debía detectar: pasaba sin ejercitar su propio criterio. Lo
+        destapó la auditoría de la ola.
+        """
         from pathlib import Path
 
         raiz = Path(__file__).resolve().parent.parent / "src"
-        infractores = [
-            f.name for f in raiz.glob("*.py")
-            if f.name not in ("providers.py", "llm_grader.py")
-            and "ChatOpenAI(" in f.read_text(encoding="utf-8")
-        ]
+        constructores = ("ChatOpenAI(", "OpenAIEmbeddings(", "SentenceTransformer(")
+
+        infractores: list[str] = []
+        for f in raiz.glob("*.py"):
+            if f.name == "providers.py":          # la única excepción legítima
+                continue
+            texto = f.read_text(encoding="utf-8")
+            for c in constructores:
+                # Se ignoran las menciones en comentarios y docstrings: lo que importa
+                # es la construcción, no hablar de ella.
+                lineas = [
+                    ln for ln in texto.splitlines()
+                    if c in ln and not ln.lstrip().startswith("#")
+                ]
+                if lineas:
+                    infractores.append(f"{f.name}: {c}")
+
         assert not infractores, (
-            f"estos módulos construyen su propio cliente de chat: {infractores}. "
-            "Deben pedírselo a providers.build_chat_model()"
+            f"estos módulos construyen su propio cliente: {infractores}. "
+            "Deben pedírselo a providers.build_chat_model()/build_embedding_backend()"
         )
 
 

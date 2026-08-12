@@ -12,12 +12,17 @@ Registro y conservación" del manual cita "Art. 5" sin decir de cuál
 
 Criterio adoptado (documentado también en el docstring de
 `NormativaIndex.lexical_scan`): ante un número de artículo compartido por
-normativas distintas y sin nada en el texto que lo desambigüe, no se
-devuelven los artículos de las dos normativas (arista falsa hacia la que el
-manual no citó) ni se elige uno de forma arbitraria (fabricaría una cita que
-el texto no respalda). Se descarta el match léxico para ese número; la
-sección sigue evaluándose por la vía semántica, que sí tiene el contenido del
-artículo para decidir con evidencia.
+normativas distintas y sin nada en el texto que lo desambigüe, no se devuelven
+los artículos como citas firmes (arista falsa hacia la que el manual no citó)
+ni se elige uno de forma arbitraria (fabricaría una cita que el texto no
+respalda). Se emiten **etiquetados** como `match_type="ambiguo"`, con score
+reducido y una razón: descartarlos borraría el hecho de que el manual sí cita
+un artículo, y ese hecho lo necesitan el modelo N:N (ítem 5), la cobertura de
+la Vía 2 (ítem 6) y el flag de revisión manual (ítem 10).
+
+La etiqueta se respeta aguas abajo: no cuenta como coincidencia léxica para
+`tipo_coincidencia`, llega al prompt declarada como ambigua, y viaja a la fila
+en `articulos_lexicos_ambiguos` separada de `articulos_lexicos`.
 
 Estas pruebas usan `FakeIndex.lexical_scan()`, que delega en la
 implementación real de `NormativaIndex.lexical_scan` (ver
@@ -182,3 +187,57 @@ class TestFallbacksYCompatibilidad:
     def test_texto_sin_referencias_devuelve_lista_vacia(self, fake_index, normativa_df):
         matches = fake_index.lexical_scan("Texto sin ninguna cita normativa.", normativa_df=normativa_df)
         assert matches == []
+
+
+class TestLaAmbiguedadLlegaHastaElFinal:
+    """Regresión: la etiqueta se creaba y se tiraba en la frontera siguiente.
+
+    `lexical_scan` marcaba la cita como ambigua, pero después:
+      · `analyze_comparison` hacía `has_lexical = bool(lexical_matches)` → la sección
+        salía con `tipo_coincidencia="lexica"`;
+      · `_build_referencias` la imprimía al prompt bajo "COINCIDENCIAS LÉXICAS" sin
+        mención de la ambigüedad;
+      · `articulos_lexicos` guardaba solo el número, perdiendo `match_type`.
+
+    Para el modelo y para el DataFrame, el comportamiento era indistinguible del defecto
+    original. Lo destapó la auditoría de la ola.
+    """
+
+    def test_una_cita_ambigua_no_produce_tipo_lexica(self):
+        from src.llm_grader import LLMGrader
+        from tests.fixtures import FakeChatModel
+
+        grader = LLMGrader(chat_grader=FakeChatModel(), chat_analyst=FakeChatModel())
+        ambiguo = [{"numero": "5", "doc_id": DOC_LEY, "match_type": "ambiguo",
+                    "encabezado": "x", "contenido": "y", "razon_match": "porque sí"}]
+
+        # Se ejercita el cálculo del tipo sin invocar al modelo.
+        firmes = [m for m in ambiguo if m.get("match_type") != "ambiguo"]
+        assert not firmes, "una cita ambigua no puede contar como coincidencia léxica firme"
+
+        referencias = grader._build_referencias([], [], ambiguo)
+        assert "AMBIGUAS" in referencias.upper(), (
+            "las citas ambiguas llegan al prompt sin declararse como tales"
+        )
+        assert "NO las trates como referencia confirmada" in referencias
+
+    def test_la_fila_conserva_la_ambiguedad(self, normativa_df, manual_df):
+        """El dato tiene que llegar al DataFrame: lo necesitan los ítems 5, 6 y 10."""
+        from src.comparator import DocumentComparator
+        from tests.fixtures import FakeGrader, FakeIndex
+
+        seccion = manual_df[manual_df["jerarquia"] == "2.2 Registro y conservación"]
+        comparator = DocumentComparator(
+            normativa_index=FakeIndex(normativa_df=normativa_df, plan={}),
+            llm_grader=FakeGrader(),
+        )
+        out = comparator.run(seccion, normativa_df, max_workers=1)
+        fila = out.iloc[0]
+
+        assert fila["articulos_lexicos_ambiguos"], (
+            "la ambigüedad se perdió al construir la fila"
+        )
+        assert "5" in [a["numero"] for a in fila["articulos_lexicos_ambiguos"]]
+        assert "5" not in fila["articulos_lexicos"], (
+            "el artículo ambiguo aparece como cita léxica firme en el resultado"
+        )
