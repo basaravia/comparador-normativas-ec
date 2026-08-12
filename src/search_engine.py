@@ -8,6 +8,7 @@ NormativaIndex:
 """
 from __future__ import annotations
 
+import json
 import re
 import logging
 from pathlib import Path
@@ -102,21 +103,75 @@ class NormativaIndex:
         self._df = normativa_df.reset_index(drop=True)
         logger.info("Índice listo: %d vectores, dim=%d", self._index.ntotal, dim)
 
+    def _firma_backend(self) -> dict:
+        """Con qué se construyó este índice. Es lo que permite rechazar una carga inválida."""
+        from datetime import datetime, timezone
+
+        backend = self._backend
+        return {
+            "backend": type(backend).__name__,
+            "modelo": getattr(backend, "nombre_modelo", None) or getattr(backend, "_model", None)
+                      or getattr(backend, "_model_name", None) or "desconocido",
+            "dim": int(self._index.d) if self._index is not None else None,
+            "prefijo_documento": getattr(backend, "prefijo_documento", ""),
+            "fecha": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "version_esquema": 1,
+        }
+
     def save(self, path: str | Path) -> None:
-        """Persiste el índice FAISS y los metadatos del DataFrame."""
+        """Persiste el índice FAISS, los metadatos del DataFrame y la firma del backend."""
         import faiss
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
         faiss.write_index(self._index, str(path / "index.faiss"))
         self._df.to_json(path / "normativa_meta.json", orient="records", force_ascii=False)
+        (path / "index_meta.json").write_text(
+            json.dumps(self._firma_backend(), ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         logger.info("Índice guardado en %s", path)
 
-    def load(self, path: str | Path) -> None:
-        """Carga índice FAISS y metadatos desde disco."""
+    def load(self, path: str | Path, *, estricto: bool = True) -> None:
+        """Carga índice FAISS y metadatos desde disco.
+
+        Rechaza el índice si se construyó con otro modelo de embeddings.
+
+        Hoy, cargar un índice ajeno falla con un error críptico de dimensión — molesto,
+        pero ruidoso. Con proveedores de nube el riesgo cambia de naturaleza: dos modelos
+        distintos de **la misma dimensión** (1536 es un valor muy común) cargan sin
+        protestar y devuelven vecinos sin sentido, en silencio. Un papel de trabajo
+        construido sobre eso es indistinguible de uno correcto.
+
+        `estricto=False` permite cargar de todas formas, avisando; existe para índices
+        anteriores a esta versión, que no llevan firma.
+        """
         import faiss
         path = Path(path)
         self._index = faiss.read_index(str(path / "index.faiss"))
         self._df = pd.read_json(path / "normativa_meta.json", orient="records")
+
+        meta_path = path / "index_meta.json"
+        if not meta_path.exists():
+            logger.warning(
+                "El índice de %s no lleva firma de backend (anterior a index_meta.json). "
+                "No se puede verificar con qué modelo se construyó.", path,
+            )
+        else:
+            guardada = json.loads(meta_path.read_text(encoding="utf-8"))
+            actual = self._firma_backend()
+            discrepancias = [
+                f"{campo}: índice={guardada.get(campo)!r} actual={actual.get(campo)!r}"
+                for campo in ("backend", "modelo", "dim")
+                if guardada.get(campo) != actual.get(campo)
+            ]
+            if discrepancias:
+                mensaje = (
+                    f"El índice de {path} se construyó con otro backend de embeddings "
+                    f"({'; '.join(discrepancias)}). Reconstrúyelo o carga con el mismo modelo."
+                )
+                if estricto:
+                    raise ValueError(mensaje)
+                logger.warning("%s (se carga igualmente: estricto=False)", mensaje)
+
         logger.info("Índice cargado: %d vectores", self._index.ntotal)
 
     # ── Búsqueda semántica ───────────────────────────────────────────────

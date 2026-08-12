@@ -38,6 +38,52 @@ class EmbeddingBackend(ABC):
         return (arr / norms).astype(np.float32)
 
 
+class LangChainEmbeddingsAdapter(EmbeddingBackend):
+    """Envuelve cualquier objeto `Embeddings` de LangChain en la interfaz del proyecto.
+
+    Es la costura que hace que añadir un proveedor de embeddings no requiera escribir una
+    clase nueva: Azure, Vertex o cualquier otro exponen `Embeddings` de LangChain, y desde
+    aquí entran con batching y normalización L2 ya resueltos.
+
+    `LangChainDMREmbeddings` queda como un caso particular de esto.
+    """
+
+    def __init__(
+        self,
+        embeddings: object,
+        *,
+        batch_size: int = EMBED_BATCH_SIZE,
+        prefijo_documento: str = "",
+        prefijo_consulta: str = "",
+        nombre_modelo: str = "desconocido",
+    ) -> None:
+        self._embedder = embeddings
+        self._batch_size = batch_size
+        self._dim: int | None = None
+        # Los prefijos son del modelo, no del código que lo llama. Declararlos aquí evita
+        # que el índice vuelva a fijarlos a ciegas (defecto 3 de §2.2).
+        self.prefijo_documento = prefijo_documento
+        self.prefijo_consulta = prefijo_consulta
+        self.nombre_modelo = nombre_modelo
+
+    def encode(self, texts: Sequence[str], prefix: str = "") -> np.ndarray:
+        textos = [f"{prefix}{t}" if prefix else t for t in texts]
+        vecs: list[list[float]] = []
+        for i in range(0, len(textos), self._batch_size):
+            vecs.extend(self._embedder.embed_documents(textos[i: i + self._batch_size]))
+
+        arr = np.array(vecs, dtype=np.float32)
+        if self._dim is None and arr.size > 0:
+            self._dim = arr.shape[1]
+        return self._l2_normalize(arr)
+
+    @property
+    def dim(self) -> int:
+        if self._dim is None:
+            self._dim = len(self._embedder.embed_query("dimension"))
+        return self._dim
+
+
 class LangChainDMREmbeddings(EmbeddingBackend):
     """Embeddings via Docker Model Runner usando la API OpenAI-compatible.
 

@@ -153,30 +153,30 @@ class FakeGrader:
         )
 
 
-class FakeChatModel:
+def fake_chat_model(
+    respuestas: list[str] | None = None,
+    excepcion: BaseException | None = None,
+):
     """Chat model inyectable para el ítem P-a, donde `LLMGrader` deja de construir el suyo.
 
-    Devuelve las respuestas de `respuestas` en orden; agotadas, repite la última. Con
-    `excepcion` lanza en su lugar, para ejercitar la clasificación de errores de `errors.py`.
+    Se apoya en `FakeListChatModel` de LangChain en vez de imitar la interfaz a mano: el
+    grader compone con LCEL (`prompt | modelo | parser`) y eso exige un `Runnable` de
+    verdad. Un doble hecho a mano falla ahí con un error de tipos que no dice nada útil.
+
+    Con `excepcion`, lanza en lugar de responder — así se ejercita la clasificación de
+    `errors.py` sin tocar la red.
     """
+    from langchain_core.language_models import FakeListChatModel
 
-    def __init__(self, respuestas: list[str] | None = None,
-                 excepcion: BaseException | None = None) -> None:
-        self.respuestas = respuestas or ["{}"]
-        self.excepcion = excepcion
-        self.llamadas = 0
-        self.prompts: list[Any] = []
+    if excepcion is not None:
+        class _Explota(FakeListChatModel):
+            def _generate(self, *a: Any, **kw: Any) -> Any:
+                raise excepcion
 
-    def invoke(self, entrada: Any, **_kw: Any) -> Any:
-        self.llamadas += 1
-        self.prompts.append(entrada)
-        if self.excepcion is not None:
-            raise self.excepcion
-        i = min(self.llamadas - 1, len(self.respuestas) - 1)
+        return _Explota(responses=["irrelevante"])
 
-        from langchain_core.messages import AIMessage
-        return AIMessage(content=self.respuestas[i])
+    return FakeListChatModel(responses=respuestas or ["{}"])
 
-    # LCEL encadena con `|`; basta con que el doble se deje componer.
-    def __or__(self, otro: Any) -> Any:
-        return otro.__ror__(self) if hasattr(otro, "__ror__") else NotImplemented
+
+# Alias en mayúscula para que lea como los demás dobles en las pruebas.
+FakeChatModel = fake_chat_model

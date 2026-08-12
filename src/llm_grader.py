@@ -16,7 +16,8 @@ Flujo por sección del manual:
 from __future__ import annotations
 
 import logging
-from typing import Literal, Optional
+from dataclasses import replace
+from typing import Any, Literal, Optional
 
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -174,31 +175,75 @@ class LLMGrader:
         temperature: float = LLM_TEMPERATURE,
         max_tokens: int = LLM_MAX_TOKENS,
         grader_max_tokens: int = LLM_GRADER_MAX_TOKENS,
+        *,
+        chat_grader: Any = None,
+        chat_analyst: Any = None,
+        spec: Any = None,
     ) -> None:
+        """El modelo puede **inyectarse** en vez de construirse aquí.
+
+        Tres formas de uso, por orden de precedencia:
+
+          1. `chat_grader` / `chat_analyst` — modelos ya construidos. Es lo que usan las
+             pruebas para no depender de un backend vivo, y lo que usará la Fase 3 para
+             pasar un cliente de nube.
+          2. `spec` — un `ProviderSpec`; las fábricas de `providers.py` los construyen.
+          3. Los parámetros sueltos de siempre — se conservan porque `master.ipynb` llama
+             así (supuesto S5), y romperlos no aporta nada.
+
+        Antes esta clase instanciaba `ChatOpenAI` directamente, lo que ataba el motor a un
+        proveedor concreto: cambiarlo obligaba a tocar el grader. Ahora es una costura.
+        """
         # Se guardan para que classify_llm_exception pueda decir *qué* modelo y *qué*
         # endpoint fallaron: el mensaje del ítem 1 tiene que ser accionable, y
         # "el backend no responde" sin decir cuál no lo es.
         self._model_id = model
         self._base_url = base_url
 
-        self._llm_grader = ChatOpenAI(
-            model=model,
-            base_url=base_url,
-            api_key="ignored",
-            temperature=temperature,
-            max_tokens=grader_max_tokens,
-            timeout=120,   # gemma4 CoT puede tardar; 2 min es suficiente para grading
-            max_retries=0,
-        )
-        self._llm_analyst = ChatOpenAI(
-            model=model,
-            base_url=base_url,
-            api_key="ignored",
-            temperature=temperature,
-            max_tokens=max_tokens,
-            timeout=180,   # análisis comparativo puede requerir más tokens de razonamiento
-            max_retries=0,
-        )
+        if chat_grader is not None or chat_analyst is not None:
+            if chat_grader is None or chat_analyst is None:
+                raise ValueError(
+                    "chat_grader y chat_analyst se inyectan juntos: usan presupuestos de "
+                    "tokens distintos y mezclar uno inyectado con otro construido produce "
+                    "corridas difíciles de interpretar"
+                )
+            self._llm_grader = chat_grader
+            self._llm_analyst = chat_analyst
+
+        elif spec is not None:
+            from .providers import build_chat_model
+
+            resuelto = spec.resuelto() if hasattr(spec, "resuelto") else spec
+            self._model_id = getattr(resuelto, "modelo", model) or model
+            self._base_url = getattr(resuelto, "base_url", base_url) or base_url
+            # Dos clientes porque el grading y el análisis tienen presupuestos distintos.
+            self._llm_grader = build_chat_model(
+                replace(resuelto, max_tokens=grader_max_tokens)
+            )
+            self._llm_analyst = build_chat_model(
+                replace(resuelto, max_tokens=max_tokens)
+            )
+
+        else:
+            self._llm_grader = ChatOpenAI(
+                model=model,
+                base_url=base_url,
+                api_key="ignored",
+                temperature=temperature,
+                max_tokens=grader_max_tokens,
+                timeout=120,   # gemma4 CoT puede tardar; 2 min es suficiente para grading
+                max_retries=0,
+            )
+            self._llm_analyst = ChatOpenAI(
+                model=model,
+                base_url=base_url,
+                api_key="ignored",
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout=180,   # el análisis puede requerir más tokens de razonamiento
+                max_retries=0,
+            )
+
         self._build_chains()
 
     def _build_chains(self) -> None:
