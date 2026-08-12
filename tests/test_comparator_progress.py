@@ -22,7 +22,7 @@ class _StubIndex:
     def lexical_scan(self, text: str, normativa_df: pd.DataFrame) -> list[dict]:
         return []
 
-    def semantic_search(self, query: str, top_k: int = 5) -> list[dict]:
+    def semantic_search(self, query: str, top_k: int = 5, min_score: float = 0.30) -> list[dict]:
         return []
 
     def rerank(self, query: str, candidates: list[dict], top_n: int = 3) -> list[dict]:

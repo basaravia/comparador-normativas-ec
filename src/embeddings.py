@@ -21,7 +21,19 @@ from .config import (
 
 
 class EmbeddingBackend(ABC):
-    """Interfaz base para backends de embedding."""
+    """Interfaz base para backends de embedding.
+
+    ``passage_prefix``/``query_prefix`` declaran, por backend, el prefijo que
+    ``encode()`` espera recibir para documentos y para consultas respectivamente
+    (defecto 3 de §2.2 del plan). El default es "": la mayoría de las APIs
+    OpenAI-compatibles (DMR incluido) no lo necesitan y anteponerlo a ciegas
+    degradaría sus embeddings. Un backend que sí lo requiera (p. ej. modelos
+    E5) lo declara sobreescribiendo estos atributos — quien construye el
+    índice (`NormativaIndex`) los lee del backend en vez de decidir por él.
+    """
+
+    passage_prefix: str = ""
+    query_prefix: str = ""
 
     @abstractmethod
     def encode(self, texts: Sequence[str], prefix: str = "") -> np.ndarray:
@@ -92,6 +104,13 @@ class LangChainDMREmbeddings(EmbeddingBackend):
       2. ai/granite-embedding-multilingual:latest → 768 dim, más rápido
     """
 
+    # Los modelos de embedding servidos por DMR (qwen3-embedding, granite) no
+    # son de la familia E5: no esperan "passage: "/"query: ". Se declaran
+    # explícitos (en vez de heredar el default en silencio) para que quede
+    # documentado por qué este backend no los usa.
+    passage_prefix = ""
+    query_prefix = ""
+
     def __init__(
         self,
         model: str = DMR_EMBED_MODEL,
@@ -147,6 +166,9 @@ class SentenceTransformersEmbeddings(EmbeddingBackend):
     Modelo recomendado: intfloat/multilingual-e5-large
     Requiere prefijos: "passage: " para documentos, "query: " para búsquedas.
     """
+
+    passage_prefix = "passage: "
+    query_prefix = "query: "
 
     def __init__(
         self,

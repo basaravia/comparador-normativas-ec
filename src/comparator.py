@@ -31,7 +31,7 @@ from tqdm import tqdm
 
 from .llm_grader import ComparisonResult, LLMGrader
 from .search_engine import NormativaIndex
-from .config import FAISS_TOP_K, MAX_WORKERS, RERANKER_TOP_N
+from .config import FAISS_TOP_K, MAX_WORKERS, MIN_SEMANTIC_SCORE, RERANKER_TOP_N
 from .errors import (
     ComparadorError,
     LLMUnavailableError,
@@ -57,15 +57,20 @@ class DocumentComparator:
         llm_grader: LLMGrader,
         top_k_faiss: int = FAISS_TOP_K,
         top_n_rerank: int = RERANKER_TOP_N,
+        min_semantic_score: float = MIN_SEMANTIC_SCORE,
         max_fallos_consecutivos: int = 3,
     ) -> None:
         self.index = normativa_index
         self.grader = llm_grader
         self.top_k_faiss = top_k_faiss
         self.top_n_rerank = top_n_rerank
+        # Defecto 1 de §2.2 del plan: antes de esto, `_process_row` nunca pasaba
+        # `min_score` a `semantic_search()`, así que el umbral configurado en el
+        # sidebar era decorativo y siempre corría con el default de config.py.
+        self.min_semantic_score = min_semantic_score
         # Tres fallos de fila seguidos dejan de parecer casualidad: casi siempre es el
-        # modelo degradandose, no las secciones. Configurable porque el umbral util
-        # depende del tamano de la corrida.
+        # modelo degradándose, no las secciones. Configurable porque el umbral útil
+        # depende del tamaño de la corrida.
         self.max_fallos_consecutivos = max_fallos_consecutivos
 
     # ── API pública ───────────────────────────────────────────────────────
@@ -274,7 +279,9 @@ class DocumentComparator:
         lexical = self.index.lexical_scan(text, normativa_df)
 
         # Phase 2b: Búsqueda semántica FAISS
-        semantic_raw = self.index.semantic_search(embed_text, top_k=self.top_k_faiss)
+        semantic_raw = self.index.semantic_search(
+            embed_text, top_k=self.top_k_faiss, min_score=self.min_semantic_score
+        )
 
         # Phase 2c: Reranking (si está habilitado en el índice)
         reranked = self.index.rerank(embed_text, semantic_raw, top_n=self.top_n_rerank)
