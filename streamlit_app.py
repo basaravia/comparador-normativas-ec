@@ -25,16 +25,8 @@ import streamlit as st
 
 from app.logging_utils import clear_log_lines, get_log_lines, save_run_log, setup_logging
 from app.theme import NIVEL_COLORS, inject_theme, render_header
-from src import (
-    DocumentComparator,
-    LangChainDMREmbeddings,
-    LLMGrader,
-    ManualParser,
-    NormativaIndex,
-    NormativaParser,
-    SentenceTransformersEmbeddings,
-)
 from src import config as cfg
+from src import service
 from src.errors import RunAbortedError
 from src.model_registry import modelos_disponibles, preflight
 from src.providers import Provider, ProviderSpec
@@ -218,14 +210,7 @@ def _pdf_picker(label: str, existing_dir: Path, upload_dir: Path, key: str, excl
     return saved_paths
 
 
-def _build_embedding_backend(config: dict):
-    if config["embed_backend_kind"] == "Docker Model Runner":
-        logger.info("Backend de embeddings: DMR / %s", config["embed_model"])
-        return LangChainDMREmbeddings(
-            model=config["embed_model"], base_url=config["dmr_base_url"], batch_size=config["embed_batch_size"]
-        )
-    logger.info("Backend de embeddings: sentence-transformers local (device=%s)", config["device"])
-    return SentenceTransformersEmbeddings(device=config["device"], batch_size=config["embed_batch_size"])
+# La construcción de backends vivía aquí. Ahora es del servicio: esta capa es vista.
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -256,23 +241,10 @@ with tab_docs:
                 len(normativa_files), len(manual_files), config["device"], config["do_ocr"],
             )
 
-            normativa_parser = NormativaParser(device=config["device"], do_ocr=config["do_ocr"], cache_dir="output/docling")
-            frames = []
-            for pdf in normativa_files:
-                st.write(f"Parseando normativa: `{pdf.name}`")
-                df = normativa_parser.parse_pdf(pdf)
-                frames.append(df)
-                logger.info("Normativa %s: %d elementos", pdf.name, len(df))
-            normativa_df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-
-            manual_parser = ManualParser(max_tokens=config["docling_max_tokens"], device=config["device"])
-            mframes = []
-            for pdf in manual_files:
-                st.write(f"Parseando manual: `{pdf.name}`")
-                df = manual_parser.parse_pdf(pdf)
-                mframes.append(df)
-                logger.info("Manual %s: %d chunks", pdf.name, len(df))
-            manual_df = pd.concat(mframes, ignore_index=True) if mframes else pd.DataFrame()
+            normativa_df, manual_df = service.tabular(
+                normativa_files, manual_files, service.ServiceConfig.desde_dict(config),
+                on_file=lambda tipo, nombre: st.write(f"Parseando {tipo}: `{nombre}`"),
+            )
 
             st.session_state["normativa_df"] = normativa_df
             st.session_state["manual_df"] = manual_df
@@ -302,15 +274,11 @@ with tab_index:
         if st.button("🧭 Construir índice FAISS", type="primary"):
             with st.status("Construyendo índice…", expanded=True) as status:
                 t0 = time.time()
-                backend = _build_embedding_backend(config)
-                index = NormativaIndex(
-                    embedding_backend=backend, use_reranker=config["use_reranker"], reranker_model=config["reranker_model"]
-                )
                 st.write("Indexando artículos normativos…")
-                index.build(st.session_state["normativa_df"], text_col="embed_text")
-
+                index = service.construir_indice(
+                    st.session_state["normativa_df"], service.ServiceConfig.desde_dict(config),
+                )
                 st.session_state["normativa_index"] = index
-                st.session_state["embed_backend"] = backend
                 elapsed = time.time() - t0
                 logger.info("Índice FAISS listo en %.1fs (%d elementos)", elapsed, len(st.session_state["normativa_df"]))
                 status.update(label=f"Índice listo ({elapsed:.1f}s)", state="complete")
@@ -388,21 +356,12 @@ with tab_compare:
             )
             total = len(selected_manual_df)
 
-            grader = LLMGrader(
-                model=config["llm_model"],
-                base_url=config["dmr_base_url"],
-                temperature=config["temperature"],
-                max_tokens=config["llm_max_tokens"],
-                grader_max_tokens=config["grader_max_tokens"],
-            )
-            comparator = DocumentComparator(
-                normativa_index=st.session_state["normativa_index"],
-                llm_grader=grader,
-                top_k_faiss=config["faiss_top_k"],
-                top_n_rerank=config["reranker_top_n"],
-                min_semantic_score=config["min_semantic_score"],
-            )
-            st.session_state["comparator"] = comparator
+            cfg = service.ServiceConfig.desde_dict(config)
+            # Cada corrida escribe en su propio directorio (§3.3.2): antes todo iba a
+            # una ruta fija y dos corridas se pisaban el reporte, sin forma de saber
+            # cuál produjo cuál.
+            rutas = service.RunPaths(run_id=service.nuevo_run_id())
+            st.session_state["run_id"] = rutas.run_id
 
             def _on_progress(done: int, total_: int, row: dict) -> None:
                 label = str(row.get("jerarquia") or row.get("titulo_seccion") or "")[:60]
@@ -412,12 +371,13 @@ with tab_compare:
             t0 = time.time()
             logger.info("Iniciando comparación (%s, %d secciones, %d hilos)", mode, total, config["max_workers"])
             try:
-                results_df = comparator.run(
-                    manual_df=selected_manual_df,
-                    normativa_df=st.session_state["normativa_df"],
-                    max_workers=config["max_workers"],
-                    desc=mode,
+                results_df = service.comparar(
+                    st.session_state["normativa_index"],
+                    selected_manual_df,
+                    st.session_state["normativa_df"],
+                    cfg,
                     progress_callback=_on_progress,
+                    desc=mode,
                 )
                 st.session_state["results_df"] = results_df
                 # Una corrida completa borra la marca de la anterior. Sin esto, tras un
@@ -425,12 +385,11 @@ with tab_compare:
                 # trabajo" sobre un papel de trabajo perfectamente válido.
                 st.session_state.pop("run_parcial", None)
 
-                excel_path = comparator.export_excel(results_df, OUTPUT_DIR / "reporte_comparacion.xlsx")
-                st.session_state["excel_bytes"] = excel_path.read_bytes()
-                st.session_state["excel_name"] = excel_path.name
-                st.session_state["json_bytes"] = results_df.to_json(
-                    orient="records", force_ascii=False, indent=2
-                ).encode("utf-8")
+                generados = service.exportar(results_df, rutas)
+                st.session_state["excel_bytes"] = generados["excel"].read_bytes()
+                st.session_state["excel_name"] = generados["excel"].name
+                st.session_state["json_bytes"] = generados["json"].read_bytes()
+                st.caption(f"Corrida `{rutas.run_id}` — artefactos en `{rutas.directorio}`")
 
                 elapsed = time.time() - t0
                 logger.info("Comparación completa en %.1fs: %d secciones analizadas", elapsed, len(results_df))

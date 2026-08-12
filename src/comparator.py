@@ -220,18 +220,24 @@ class DocumentComparator:
         sample = manual_df.sample(min(n, len(manual_df)), random_state=42)
         return self.run(sample, normativa_df, max_workers=max_workers, desc=f"Muestra {n} secciones")
 
+    @staticmethod
     def export_excel(
-        self,
         df: pd.DataFrame,
         output_path: str | Path,
     ) -> Path:
-        """Exporta el DataFrame de resultados a Excel con formato visual por nivel de cumplimiento."""
+        """Exporta el DataFrame de resultados a Excel con formato visual por nivel.
+
+        Estático porque no usa estado de la instancia: solo delega en `_flatten_for_excel`,
+        que también lo es. Así `service.py` puede exportar sin construir un comparador
+        —que exigiría un índice y un grader vivos solo para escribir un archivo—. Llamarlo
+        sobre una instancia sigue funcionando, que es como lo hace `master.ipynb` (S5).
+        """
         from openpyxl.styles import PatternFill, Font, Alignment
 
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        df_export = self._flatten_for_excel(df)
+        df_export = DocumentComparator._flatten_for_excel(df)
 
         with pd.ExcelWriter(str(output_path), engine="openpyxl") as writer:
             df_export.to_excel(writer, index=False, sheet_name="Comparación")
