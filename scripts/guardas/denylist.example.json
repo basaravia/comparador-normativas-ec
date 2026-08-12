@@ -1,0 +1,142 @@
+{
+  "_doc": [
+    "PLANTILLA de denylist — SIN identificadores. Copiar y rellenar:",
+    "    mkdir -p .claude && cp scripts/guardas/denylist.example.json .claude/denylist.json",
+    "",
+    ".claude/ esta en .gitignore: la denylist real NUNCA se versiona, porque contiene el",
+    "nombre del cliente y su huella de marca. Los scripts si se versionan (son genericos)",
+    "para que las guardas viajen a cualquier clon.",
+    "",
+    "Sin .claude/denylist.json el escaner aborta con codigo 2 (fail-closed): un escaner",
+    "que no puede validar nada no debe dejar pasar nada."
+  ],
+  "bloquea": {
+    "identidad": {
+      "_doc": "Nombre de la entidad y filiales. Regex, se aplican sin distinguir mayúsculas.",
+      "patrones": [
+        "EJEMPLO_NOMBRE_ENTIDAD",
+        "EJEMPLO_FILIAL"
+      ],
+      "_ampliar": "Anadir aqui el nombre de la entidad y todas sus filiales, como regex."
+    },
+    "marca": {
+      "_doc": "Huella cromática + tipográfica. Identifica tanto como el nombre.",
+      "patrones": [
+        "#000000",
+        "NombreDeFuente"
+      ],
+      "_excepcion_rutas": [
+        "assets/brand/"
+      ],
+      "_ampliar": "Anadir los hex de la paleta corporativa y la familia tipografica: juntos identifican a la entidad tanto como su nombre."
+    },
+    "credenciales": {
+      "_doc": [
+        "[ \\t]* en vez de \\s* tras el separador: \\s* cruza saltos de linea, asi que",
+        "'API_KEY=' sin valor capturaba el '#' de la linea siguiente como si lo fuera.",
+        "Medido: .env.example con las variables vacias daba 1 falso positivo."
+      ],
+      "patrones": [
+        "AZURE_OPENAI_API_KEY[ \\t]*=[ \\t]*\\S+",
+        "GROQ_API_KEY[ \\t]*=[ \\t]*\\S+",
+        "sk-[A-Za-z0-9]{20,}",
+        "(?:api[_-]?key|secret|password|token)[ \\t]*[:=][ \\t]*[\"'][^\"'\\s]{12,}[\"']"
+      ]
+    }
+  },
+  "advierte": {
+    "_calibracion": [
+      "Medido contra el árbol real el 2026-08-12. Una versión anterior daba 27 avisos,",
+      "~26 de ellos falsos: matcheaba el NOMBRE de rutas internas (que el .gitignore y el",
+      "README nombran legítimamente) y co-ocurrencia de 'nivel_cumplimiento' + 'jerarquia',",
+      "que en src/ y tests/ son nombres de columna del esquema, no datos del cliente.",
+      "Un hook que chilla 27 veces se desactiva en una semana. Precisión > cobertura aquí."
+    ],
+    "estructura_manual_interno": {
+      "_doc": [
+        "Títulos de sección del manual interno con su numeración: 'N.N.N. TITULO EN MAYUSCULAS…'.",
+        "Es contenido real del cliente, no vocabulario. Medido: 1 verdadero positivo",
+        "(master.ipynb) y 0 falsos sobre la normativa pública y la documentación del repo.",
+        "Solo se aplica a archivos que transportan datos, no a código fuente: un .py que",
+        "define el esquema no contiene resultados."
+      ],
+      "patrones": [
+        "\\b\\d+\\.\\d+\\.\\d+\\.?[ \\t]+[A-ZÁÉÍÓÚÑ]{4,}"
+      ],
+      "_solo_extensiones": [
+        ".ipynb",
+        ".xlsx",
+        ".csv",
+        ".json",
+        ".md",
+        ".txt",
+        ".html"
+      ],
+      "_case_sensitive": true,
+      "_nota_case": [
+        "OBLIGATORIO. La señal es el título EN MAYÚSCULAS ('N.N.N. TITULO EN MAYUSCULAS').",
+        "Con re.IGNORECASE esto matchea '1.1.2. Reducir' de una ley pública y '§3.3.1 deja'",
+        "de este mismo plan. Medido: sin case-sensitive, 3 de 4 avisos eran falsos.",
+        "El [ \\t]+ en vez de \\s+ evita cruzar saltos de línea ('docling==2.55.1\\nocrmac')."
+      ]
+    },
+    "documentos_internos_en_git": {
+      "_doc": [
+        "NO busca el nombre de la ruta dentro de los archivos —nombrar 'document_test/' no",
+        "filtra nada y el .gitignore tiene que poder mencionarlo—. Busca que un archivo",
+        "SITUADO en esas rutas esté entrando a git, que es el riesgo real."
+      ],
+      "rutas_prohibidas": [
+        "document_test/**",
+        "output/rag_index/**",
+        "output/markitdown/*POL*",
+        "output/docling/*POL*",
+        "output/comparador/**",
+        "output/uploads/**",
+        "output/logs/**"
+      ]
+    }
+  },
+  "rutas_ignoradas_por_el_escaner": {
+    "_doc": "No se escanean: ya están fuera de git o son ruido.",
+    "globs": [
+      ".git/**",
+      ".claude/**",
+      "assets/brand/**",
+      "!assets/brand/_placeholder/**",
+      "output/uploads/**",
+      "output/logs/**",
+      "document_test/**",
+      "**/__pycache__/**",
+      "**/.ipynb_checkpoints/**",
+      "node_modules/**",
+      ".venv*/**"
+    ]
+  },
+  "no_escaneables": {
+    "_doc": [
+      "Extensiones cuyo contenido no se puede inspeccionar como texto, y límite de tamaño.",
+      "Nunca se dan por limpias: se listan y el escáner PREGUNTA si continuar (go/no-go).",
+      "El default de esa pregunta es NO."
+    ],
+    "_nota_svg": [
+      "SVG NO esta en esta lista, y es deliberado: es XML plano y se escanea como texto.",
+      "Clasificarlo como inescaneable era un error — un logotipo en SVG es precisamente",
+      "donde un hex de marca del cliente viajaria a plena vista sin que nadie lo mirara."
+    ],
+    "extensiones": [
+      ".png",
+      ".jpg",
+      ".jpeg",
+      ".gif",
+      ".webp",
+      ".faiss",
+      ".parquet",
+      ".bin",
+      ".pt",
+      ".safetensors"
+    ],
+    "limite_tamano_mb": 5,
+    "_nota_tamano": "Por encima del límite no se intenta extraer texto: un hook debe ser rápido. El archivo pasa a la lista de decisión manual."
+  }
+}
