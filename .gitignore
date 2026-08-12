@@ -46,6 +46,17 @@ Informe_*.docx
 assets/brand/*
 !assets/brand/_placeholder/
 
+# ── Resultados de corrida ─────────────────────────────────────────────────────
+# TODO lo que produce una corrida sale del manual del cliente: jerarquías de sección,
+# veredictos de cumplimiento, brechas y análisis. Se excluye el directorio entero, no
+# por extensión: el Excel estaba cubierto por `output/**/*.xlsx` pero el JSON hermano
+# —con el mismo contenido— no lo estaba, y se habría subido.
+#
+# Regla: aquí se enumera lo que se PERMITE, no lo que se prohíbe. Un artefacto nuevo
+# nace excluido, que es el sentido correcto del default.
+output/runs/
+output/workspaces/
+
 # Artefactos generados por el pipeline (regenerables, no commitar)
 output/comparador/
 output/**/*.xlsx

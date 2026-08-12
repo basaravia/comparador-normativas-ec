@@ -160,6 +160,23 @@ def revisar(ruta: str, texto: str, dl: dict) -> tuple[list, list]:
                 bloq.append((ruta, _linea_de(texto, m.start()), grupo, frag.strip()))
                 break  # una coincidencia por patrón basta para bloquear
 
+        # Co-ocurrencia: dispara solo si aparecen señales de TODAS las familias.
+        #
+        # Sirve para detectar un artefacto por su forma en vez de por su ruta: un
+        # resultado de corrida lleva a la vez veredicto, trazabilidad y análisis, y esa
+        # combinación no ocurre por casualidad. Aquí sí bloquea —a diferencia de la
+        # versión que se quitó de `advierte`— porque los términos son literales del
+        # esquema con comillas de JSON, no vocabulario suelto que aparezca en el código.
+        co = cfg.get("co_ocurrencia")
+        if co:
+            presentes = {
+                familia: next((p for p in pats if re.search(p, texto, re.I)), None)
+                for familia, pats in co.items()
+            }
+            if all(presentes.values()):
+                detalle = " + ".join(f"{k}:{v}" for k, v in presentes.items())
+                bloq.append((ruta, 0, grupo, detalle[:110]))
+
     for grupo, cfg in _grupos(dl["advierte"]):
         # Algunas heurísticas solo tienen sentido en archivos que transportan datos:
         # un .py que define el esquema no contiene resultados del cliente.
