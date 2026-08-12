@@ -129,20 +129,20 @@ Verificado contra el código el 2026-08-12. Todas las referencias de línea reco
 
 | Ítem | Causa raíz localizada | Evidencia |
 |------|----------------------|-----------|
-| 1 | `analyze_comparison()` captura **toda** excepción y devuelve `nivel_cumplimiento="no_aplica"` con el error dentro de `analisis_general` | `src/llm_grader.py:293-299` |
-| 1 | `DocumentComparator.run()` captura la excepción por fila y la sustituye por `_empty_result()`, que también es `no_aplica` | `src/comparator.py:89-93`, `src/comparator.py:221-238` |
-| 1 | No hay cancelación: el `ThreadPoolExecutor` sigue enviando las filas restantes aunque el modelo ya no responda | `src/comparator.py:81-98` |
-| 4 | Al fallar el parseo del grading: `logger.warning(… "Se asumen todos relevantes")` y devuelve `relevante=True` para todos | `src/llm_grader.py:235-237` |
-| 4 | Aun con parseo exitoso, un candidato cuyo `element_id` no aparezca en la respuesta queda `relevante=True` por defecto | `src/llm_grader.py:243-248` |
-| 4 | `_check_dmr()` solo comprueba `status_code==200` de `/models`; **no** lee la lista ni valida que el modelo configurado exista | `streamlit_app.py:60-68` |
-| 4 | Los modelos del sidebar son constantes hardcodeadas, no la lista real del DMR | `streamlit_app.py:91-114` |
-| 2 | La corrida es **bloqueante dentro del script-run** de Streamlit: al refrescar, la sesión nueva nace vacía mientras los hilos siguen vivos en el proceso | `streamlit_app.py:352-406` |
-| 2 | El handler de logs escribe en `st.session_state` desde hilos worker (sin `ScriptRunContext`) y falla en silencio → el panel "Registro de ejecución" queda vacío | `app/logging_utils.py:30-38` |
-| 3 | No existe persistencia parcial: `results_df` solo se materializa al terminar el `run()` completo | `src/comparator.py:98` |
-| 5 | La relación artículo↔sección se **aplana a strings** al exportar; se pierde la trazabilidad N:N | `src/comparator.py:240-259` |
-| 7 | Solo hay cantidad (`n_sample`) y la selección es **aleatoria** (`sample(random_state=42)`) | `streamlit_app.py:336-340`, `streamlit_app.py:355` |
-| 8 | La normativa se trocea solo por regex de artículo, con truncado duro a 3000 caracteres; no hay chunking semántico ni evaluación de retrieval | `src/document_parser.py:296-333` |
-| 9 | `export_excel()` produce una sola hoja plana; no es un papel de trabajo ni es configurable | `src/comparator.py:111-165` |
+| 1 | `analyze_comparison()` captura **toda** excepción y devuelve `nivel_cumplimiento="no_aplica"` con el error dentro de `analisis_general` | `src/llm_grader.py::LLMGrader.analyze_comparison` |
+| 1 | `DocumentComparator.run()` captura la excepción por fila y la sustituye por `_empty_result()`, que también es `no_aplica` | `src/comparator.py::DocumentComparator.run`, `src/comparator.py::DocumentComparator._empty_result` |
+| 1 | No hay cancelación: el `ThreadPoolExecutor` sigue enviando las filas restantes aunque el modelo ya no responda | `src/comparator.py::DocumentComparator.run` |
+| 4 | Al fallar el parseo del grading: `logger.warning(… "Se asumen todos relevantes")` y devuelve `relevante=True` para todos | `src/llm_grader.py::LLMGrader.grade_candidates` |
+| 4 | Aun con parseo exitoso, un candidato cuyo `element_id` no aparezca en la respuesta queda `relevante=True` por defecto | `src/llm_grader.py::LLMGrader.grade_candidates` |
+| 4 | `_check_dmr()` solo comprueba `status_code==200` de `/models`; **no** lee la lista ni valida que el modelo configurado exista | `streamlit_app.py::_modelos_del_backend` |
+| 4 | Los modelos del sidebar son constantes hardcodeadas, no la lista real del DMR | `streamlit_app.py::_sidebar_config` |
+| 2 | La corrida es **bloqueante dentro del script-run** de Streamlit: al refrescar, la sesión nueva nace vacía mientras los hilos siguen vivos en el proceso | `streamlit_app.py`, bloque `if run_clicked:` |
+| 2 | El handler de logs escribe en `st.session_state` desde hilos worker (sin `ScriptRunContext`) y falla en silencio → el panel "Registro de ejecución" queda vacío | `app/logging_utils.py::_StreamlitBufferHandler.emit` |
+| 3 | No existe persistencia parcial: `results_df` solo se materializa al terminar el `run()` completo | `src/comparator.py::DocumentComparator.run` |
+| 5 | La relación artículo↔sección se **aplana a strings** al exportar; se pierde la trazabilidad N:N | `src/comparator.py::DocumentComparator._flatten_for_excel` |
+| 7 | Solo hay cantidad (`n_sample`) y la selección es **aleatoria** (`sample(random_state=42)`) | `streamlit_app.py`, selector "Muestra rápida", `streamlit_app.py`, muestreo aleatorio |
+| 8 | La normativa se trocea solo por regex de artículo, con truncado duro a 3000 caracteres; no hay chunking semántico ni evaluación de retrieval | `src/document_parser.py::NormativaParser._parse_text` |
+| 9 | `export_excel()` produce una sola hoja plana; no es un papel de trabajo ni es configurable | `src/comparator.py::DocumentComparator.export_excel` |
 
 ### 2.2 Defectos adicionales encontrados, no listados en el informe
 
@@ -151,34 +151,34 @@ Bajo costo, alto impacto sobre la calidad de los resultados. Se corrigen en la O
 
 1. **El slider "Score semántico mínimo" no tiene efecto en la corrida.**
    `_process_row()` llama `semantic_search(embed_text, top_k=…)` sin `min_score`
-   (`src/comparator.py:178`), así que usa el valor de `config.py` (0.30), no el del sidebar.
-   `DocumentComparator.__init__` ni siquiera recibe el umbral (`streamlit_app.py:366-371`).
+   (`src/comparator.py::DocumentComparator._process_row`), así que usa el valor de `config.py` (0.30), no el del sidebar.
+   `DocumentComparator.__init__` ni siquiera recibe el umbral (`streamlit_app.py`, construcción del `DocumentComparator`).
    El informe pide que la alerta de la Vía 1 se apalanque "en los umbrales de similitud ya
    existentes en la app" — hoy ese control es decorativo fuera de la pestaña 2.
 
 2. **`lexical_scan()` cruza artículos entre normativas distintas.**
-   Compara solo por `numero` sobre el `normativa_df` completo (`src/search_engine.py:188-220`).
+   Compara solo por `numero` sobre el `normativa_df` completo (`src/search_engine.py::NormativaIndex.lexical_scan`).
    Con varias normas cargadas, un "Art. 5" del manual matchea el Art. 5 de *todas* ellas.
    Con el modelo N:N (ítem 5) esto se vuelve crítico: genera aristas falsas de cobertura.
 
 3. **Los prefijos del backend local se anulan.**
    `NormativaIndex.build()` y `semantic_search()` fuerzan `prefix=""`
-   (`src/search_engine.py:99`, `src/search_engine.py:136`), pero
+   (`NormativaIndex.build` / `.semantic_search`), pero
    `SentenceTransformersEmbeddings` usa `intfloat/multilingual-e5-large`, que **requiere**
    `passage: ` / `query: `. El backend local rinde por debajo de su capacidad. Entra en el
    ítem 8 (calidad de retrieval en español).
 
 4. **El índice FAISS persistido no registra con qué modelo se generó.**
    `save()` escribe `index.faiss` + `normativa_meta.json` y nada más
-   (`src/search_engine.py:107-122`). Hoy el daño se limita a un error críptico de dimensión.
+   (`src/search_engine.py::NormativaIndex.save` / `.load`). Hoy el daño se limita a un error críptico de dimensión.
    Con proveedores de nube el riesgo cambia de naturaleza: dos modelos distintos de **la misma
    dimensión** (1536 es un valor muy común) cargan sin protestar y devuelven vecinos sin
    sentido, en silencio. Se corrige dentro de P-a.
 
 5. **La paleta está duplicada a mano en dos archivos.**
-   `app/theme.py:38-43` (`NIVEL_COLORS`) y `src/comparator.py:137-142` (los `PatternFill` del
+   `app/theme.py`, `NIVEL_COLORS` (`NIVEL_COLORS`) y `src/comparator.py::DocumentComparator.export_excel` (los `PatternFill` del
    Excel) repiten los mismos hex escritos a mano: `E2EFDA`, `FFF2CC`, `FCE4D6`, `F2F2F2`. El
-   docstring de `theme.py:36-37` dice que "coinciden"; coinciden porque alguien los copió. Al
+   docstring de `app/theme.py`, docstring de `NIVEL_COLORS` dice que "coinciden"; coinciden porque alguien los copió. Al
    cambiar la identidad visual hay que tocar dos sitios o el Excel y la UI dejan de leerse
    igual. En Fase 2 se suma React como tercer consumidor. Se corrige en el ítem T.
 
@@ -206,7 +206,7 @@ No son bugs del producto; son condiciones sin las cuales el plan no se puede eje
    (recall@5 ≥ 0.80) y la verificación de que no se cuele un `.env` son inejecutables.
 
 5. **No hay `pyproject.toml`** (ni `pytest.ini`, ni lockfile, ni linter fijado). `import src`
-   funciona por el `sys.path.insert` de `tests/conftest.py:26`. Doce ramas concurrentes sobre
+   funciona por el `sys.path.insert` de `tests/conftest.py`, preámbulo. Doce ramas concurrentes sobre
    esa base generan conflictos evitables.
 
 6. **`master.ipynb` no tiene prueba de regresión.** El supuesto S5 promete compatibilidad, pero
@@ -271,7 +271,7 @@ lo que evita reescribir en la 2 y la 3.
    gratis. Retro-fitearlo cuando ya hay resultados, Excel generados y un esquema publicado es
    de lo más caro que queda por delante. Es el seguro más barato de la lista.
 
-2. **Rutas de salida por corrida, nunca fijas.** Hoy `streamlit_app.py:391` escribe siempre a
+2. **Rutas de salida por corrida, nunca fijas.** Hoy `streamlit_app.py`, ruta de `export_excel` escribe siempre a
    `output/comparador/reporte_comparacion.xlsx`. Pasa a `output/runs/<run_id>/…`. El ítem 3 lo
    necesita igual para los checkpoints, así que no es trabajo extra — solo hay que no dejar la
    ruta fija "porque de momento hay un solo usuario".
@@ -288,8 +288,8 @@ lo que evita reescribir en la 2 y la 3.
    `comparator.py` no llame a la implementación concreta como si fuera la única posible.
 
 6. **Nada específico de macOS fuera de la implementación concreta.** `sys.platform == "darwin"`
-   ya está aislado en `_build_pdf_pipeline_options` (`src/document_parser.py:66-74`), bien. Pero
-   `KMP_DUPLICATE_LIB_OK` vive en `streamlit_app.py:21` y `tests/conftest.py:18`: es un
+   ya está aislado en `_build_pdf_pipeline_options` (`src/document_parser.py::_build_pdf_pipeline_options`), bien. Pero
+   `KMP_DUPLICATE_LIB_OK` vive en `streamlit_app.py`, preámbulo del módulo y `tests/conftest.py`, preámbulo: es un
    workaround de arranque de proceso y debe moverse a la capa de bootstrap. Cuando el frontend
    deje de ser Python, ese `os.environ.setdefault` se pierde y aparece un segfault difícil de
    rastrear.
@@ -314,7 +314,7 @@ lo que evita reescribir en la 2 y la 3.
 | S9 | Reranker | **ENMENDADO 2026-08-12: parametrizable, local por defecto.** La redacción original ("siempre local con cualquier proveedor") se escribió cuando ningún candidato de nube exponía reranking homogéneo; hoy los hay servibles por endpoint. `providers.build_reranker(spec)` es la tercera costura, junto a chat y embeddings, y el índice ya no lo construye en su `__init__`: eso ataba indexar a cargar ~1.2 GB de pesos, e impedía que el contenedor de Fase 2 prescindiera de torch para reordenar tres candidatos. |
 | S10 | UI de la Fase 1 | **Streamlit se conserva como vista delgada**, no se rediseña. Montar SPA + API para un usuario en una Mac retrasaría el piloto sin añadirle capacidad. La condición es que `feature/service-layer` se haga igual: con la orquestación fuera de la UI, la Fase 2 reescribe presentación, no lógica. |
 | S11 | Frontend de la Fase 2 | **Vite + React + TypeScript**, monorepo, tipos generados desde el OpenAPI de FastAPI. Los modelos Pydantic pasan a ser los tipos del frontend — otra razón para que `CoverageLink` esté temprano y estable. |
-| S12 | Identidad del cliente | El repositorio **no identifica al cliente**. El nombre sale de `ORG_DISPLAY_NAME` (`app/theme.py:9-11`) y los valores de marca de `assets/brand/brand.json`, ambos fuera de git. Es la postura establecida en el commit `32710e5` y se mantiene. |
+| S12 | Identidad del cliente | El repositorio **no identifica al cliente**. El nombre sale de `ORG_DISPLAY_NAME` (`app/theme.py::page_title`) y los valores de marca de `assets/brand/brand.json`, ambos fuera de git. Es la postura establecida en el commit `32710e5` y se mantiene. |
 
 ---
 
@@ -369,8 +369,8 @@ Transversal:
 ```
 
 **La costura que define la Fase 2 es `src/service.py`.** Todo lo que hoy vive en
-`streamlit_app.py` y no es presentación se muda ahí: `_build_embedding_backend()` (`:207-214`),
-el armado de `LLMGrader`/`DocumentComparator` (`:359-371`) y el flujo entre las cuatro
+`streamlit_app.py` y no es presentación se muda ahí: `_build_embedding_backend()` (`_build_embedding_backend`),
+el armado de `LLMGrader`/`DocumentComparator` (armado de `LLMGrader`/`DocumentComparator`) y el flujo entre las cuatro
 pestañas. Streamlit queda como una vista que llama a ese servicio; FastAPI, en la Fase 2, será
 otra.
 
@@ -424,7 +424,7 @@ Al cerrar las cuatro olas, un único PR `feature/comparador-v2` → `main`.
 
 - **`pyproject.toml`**: metadatos, `[tool.pytest.ini_options]` con los marcadores (`e2e`,
   `retrieval`), `[tool.ruff]`, y `src`/`app` como paquetes para eliminar el `sys.path.insert`
-  de `tests/conftest.py:26`.
+  de `tests/conftest.py`, preámbulo.
 - **Entorno dedicado** creado desde `dependencies/environment.yml`. `environment.yml` de la
   raíz se marca como freeze histórico o se elimina.
 - **CI** (`.github/workflows/ci.yml`): `pytest -m "not e2e"` + `ruff`.
@@ -503,7 +503,7 @@ queda como `no_aplica`; el Excel/JSON nunca contiene un mensaje de error en `ana
 Los tres defectos de §2.2 (1–3), que el ítem 6 necesita funcionando:
 
 - `DocumentComparator.__init__` recibe `min_semantic_score` y `_process_row()` lo pasa a
-  `semantic_search()` (`src/comparator.py:178`). El slider del sidebar deja de ser decorativo.
+  `semantic_search()` (`src/comparator.py::DocumentComparator._process_row`). El slider del sidebar deja de ser decorativo.
 - `lexical_scan()` distingue las citas ambiguas de las firmes para no cruzar normativas
   (ver la enmienda de abajo).
 - Se restauran los prefijos `passage:`/`query:` del backend local, declarados **por el
@@ -549,8 +549,8 @@ como `ambiguo` y así se declara en el resultado y en el prompt.
 construye únicamente la costura que permite añadirlos en la Fase 3 sin refactorizar.
 
 **Estado actual:** todo está cableado a DMR. `LLMGrader.__init__` instancia
-`ChatOpenAI(base_url=…, api_key="ignored")` directamente (`src/llm_grader.py:180-197`) y
-`LangChainDMREmbeddings` hace lo propio con `OpenAIEmbeddings` (`src/embeddings.py:56-65`).
+`ChatOpenAI(base_url=…, api_key="ignored")` directamente (`src/llm_grader.py::LLMGrader.__init__`) y
+`LangChainDMREmbeddings` hace lo propio con `OpenAIEmbeddings` (`src/embeddings.py::LangChainDMREmbeddings.__init__`).
 **No hay una sola lectura de variables de entorno en el código**: `python-dotenv` está
 declarado en `dependencies/requirements.txt` pero nunca se usa, y `config.py` tiene los
 endpoints hardcodeados. `.env` ya está en `.gitignore`.
@@ -572,7 +572,7 @@ endpoints hardcodeados. `.env` ya está en `.gitignore`.
   `LangChainDMREmbeddings` pasa a ser un caso particular.
 - `src/search_engine.py`: `save()` escribe `index_meta.json` con `proveedor + modelo + dim +
   fecha`; `load()` rechaza cargar si no coincide con el backend activo (§2.2, defecto 4).
-- `KMP_DUPLICATE_LIB_OK` se muda de `streamlit_app.py:21` a la capa de bootstrap (§3.3.6).
+- `KMP_DUPLICATE_LIB_OK` se muda de `streamlit_app.py`, preámbulo del módulo a la capa de bootstrap (§3.3.6).
 
 **DoD** — Ningún módulo de `src/` construye un cliente de LLM o de embeddings directamente.
 Un índice FAISS construido con un modelo y cargado con otro se rechaza con mensaje explícito.
@@ -581,7 +581,7 @@ Ninguna credencial sobrevive a `redact()` en logs ni en el Excel.
 **Tests** — `tests/test_providers.py` (construcción con env mockeado, precedencia,
 redacción de secretos) y `tests/test_index_meta.py`. Todo sin red.
 
-> *La redacción se probó dentro de `test_providers.py::TestRedaccionDeSecretos` en vez de
+> *La redacción se probó dentro de `tests/test_providers.py::TestRedaccionDeSecretos` en vez de
 > en un archivo aparte; el contenido exigido está, el nombre del archivo no aporta.*
 
 ---
@@ -624,9 +624,9 @@ Forzar un fallo de parseo → 0 candidatos marcados `relevante=True`; la fila ap
 
 > **✅ HECHO · `feature/design-tokens` · 42 pruebas**
 
-**Problema:** §2.2 defecto 5 — la paleta está duplicada a mano entre `app/theme.py:38-43` y
-`src/comparator.py:137-142`, y la paleta actual es un placeholder que el propio docstring de
-`theme.py:3-7` admite haber inventado. Ver §8 para el sistema visual completo.
+**Problema:** §2.2 defecto 5 — la paleta está duplicada a mano entre `app/theme.py`, `NIVEL_COLORS` y
+`src/comparator.py::DocumentComparator.export_excel`, y la paleta actual es un placeholder que el propio docstring de
+`app/theme.py`, docstring del módulo admite haber inventado. Ver §8 para el sistema visual completo.
 
 **Cambios**
 
@@ -636,7 +636,7 @@ Forzar un fallo de parseo → 0 candidatos marcados `relevante=True`; la fila ap
 - `app/theme.py` consume los tokens en vez de definir `_PALETTE`.
 - `src/comparator.py` consume los tokens para los `PatternFill` en vez de repetir los hex.
 - Se aplica la separación cromo/dato por saturación y los mínimos de contraste de §8.
-- **Se arregla de paso** el ítem 14 del anexo: `app/theme.py:89-91`
+- **Se arregla de paso** el ítem 14 del anexo: `app/theme.py`, regla CSS del sidebar
   (`section[data-testid="stSidebar"] * { color:#EAF0F6 !important }`) pinta también el texto de
   los inputs sobre fondo claro. Es ~1 h y molesta en las demos. *(La versión anterior del plan
   lo ubicaba en `:73-75`; la referencia ya derivó.)*
@@ -660,8 +660,8 @@ ella, es reescribir presentación.
 **Cambios**
 
 - **NUEVO `src/service.py`** — toda la orquestación que hoy vive en `streamlit_app.py`:
-  construcción de backends (`:207-214`), armado de `LLMGrader`/`DocumentComparator`
-  (`:359-371`), y las operaciones del flujo (`tabular()`, `construir_indice()`, `comparar()`,
+  construcción de backends (`_build_embedding_backend`), armado de `LLMGrader`/`DocumentComparator`
+  (armado de `LLMGrader`/`DocumentComparator`), y las operaciones del flujo (`tabular()`, `construir_indice()`, `comparar()`,
   `exportar()`), con `workspace_id` y `run_id` como parámetros de primera clase (§3.3.1-2).
 - `streamlit_app.py` queda como vista: widgets, estado de sesión y llamadas al servicio. Sin
   lógica de pipeline.
@@ -723,7 +723,7 @@ resistencia a un `rows.jsonl` truncado), y un caso `AppTest` en
 #### Ítem 5 — Modelo de datos N:N · `feature/coverage-model` · ~3 j
 
 **Problema:** hoy el resultado es un DataFrame con una fila por sección y los artículos
-aplanados a texto (`src/comparator.py:240-259`). No se puede responder "¿qué secciones cubren
+aplanados a texto (`src/comparator.py::DocumentComparator._flatten_for_excel`). No se puede responder "¿qué secciones cubren
 el Art. 35?" sin volver a correr todo. El informe sube el requisito de 1:N a **N:N**: una
 sección puede tener que satisfacer artículos de varias normas a la vez.
 
@@ -865,7 +865,7 @@ hoja "Revisión manual" lista el motivo de cada una.
     los documentos ecuatorianos), con solape configurable.
   - Modelo **parent-child**: se indexa el sub-chunk, se devuelve el artículo padre. Preserva "el
     artículo como unidad de resultado" del Bloque A mientras mejora el recall.
-  - Elimina el truncado ciego a 3000 caracteres de `src/document_parser.py:327`.
+  - Elimina el truncado ciego a 3000 caracteres de `src/document_parser.py::NormativaParser._parse_text`.
 - `src/search_engine.py`: `build()` indexa sub-chunks y agrupa por `articulo_element_id` al
   devolver.
 - **Arnés de evaluación**
@@ -904,7 +904,7 @@ padre-hijo, artículos cortos que no se subdividen).
   - **Membrete** desde `assets/brand/` (§8): el logo es configuración del backend, no solo del
     frontend.
   - Consume `src/design_tokens.py` para los fills (ítem T), no hex literales.
-  - `src/comparator.py:111-165` queda como fachada delegando aquí.
+  - `src/comparator.py::DocumentComparator.export_excel` queda como fachada delegando aquí.
 - Columna `prioridad` derivada de nivel + criticidad del artículo (heurística documentada y
   sobreescribible en la plantilla).
 
@@ -1026,14 +1026,14 @@ No se detalla hasta cerrar la Fase 1. Lo que ya se sabe:
 
 **Bloqueantes verificados**
 
-1. **`ocrmac` es macOS-only y está declarado sin condicionar** (`dependencies/requirements.txt:4`,
-   `dependencies/environment.yml:23`). En Linux arrastra `pyobjc-framework-Vision` y el
+1. **`ocrmac` es macOS-only y está declarado sin condicionar** (`dependencies/requirements.txt`, línea de `ocrmac`,
+   `dependencies/environment.yml`, línea de `ocrmac`). En Linux arrastra `pyobjc-framework-Vision` y el
    `pip install` falla. **La imagen no compila hoy.** Hay que separar requisitos por plataforma.
-2. **El camino de OCR en Linux nunca se ha ejercitado.** `src/document_parser.py:66-74` cae a
+2. **El camino de OCR en Linux nunca se ha ejercitado.** `src/document_parser.py::_build_pdf_pipeline_options` cae a
    `opts.do_ocr = do_ocr` sin `ocr_options`, y Docling descarga su motor por defecto con pesos
    propios. Hay que elegirlo y probarlo.
-3. **MPS desaparece.** `_resolve_device("auto")` (`src/document_parser.py:25-33`,
-   `src/embeddings.py:136`) resuelve a CPU. El workaround `KMP_DUPLICATE_LIB_OK` y el bug de NaN
+3. **MPS desaparece.** `_resolve_device("auto")` (`src/document_parser.py::_resolve_device`,
+   `src/embeddings.py::SentenceTransformersEmbeddings._resolve_device`) resuelve a CPU. El workaround `KMP_DUPLICATE_LIB_OK` y el bug de NaN
    del reranker en MPS dejan de aplicar en el contenedor pero siguen vivos en desarrollo: **dos
    perfiles de ejecución que hay que mantener conscientemente.**
 4. **Peso de la imagen.** torch + Docling + CrossEncoder + faiss en el mismo proceso: varios GB
@@ -1269,7 +1269,7 @@ bloqueado por el punto pendiente 3).
 - **Ítem 14** (contraste del sidebar) — se corrige dentro del ítem T.
 - **Ítem 15** (rango de hilos según backend) — las costuras de P-a lo dejan a un paso: basta
   añadir `concurrencia_recomendada` al `ProviderSpec`. Relevante solo en Fase 3, donde
-  `MAX_WORKERS=1` (calibrado para DMR secuencial en M1, `src/config.py:61`) deja de aplicar.
+  `MAX_WORKERS=1` (calibrado para DMR secuencial en M1, `src/config.py`, `MAX_WORKERS`) deja de aplicar.
 - **Ítem 18** (análisis de costos) — el contador de llamadas del ítem 6 queda listo en Fase 1;
   falta solo el precio por token, que es dato de Fase 3.
 
