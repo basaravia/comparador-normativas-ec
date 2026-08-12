@@ -80,8 +80,8 @@
       "ratio_texto": 10.15,
       "icono": "check",
       "etiqueta": "Cumple",
-      "marca": "#0F766E",
-      "ratio_marca": 5.47
+      "marca": "#0369A1",
+      "ratio_marca": 5.93
     },
     "parcial": {
       "tinte": "#FFF2CC",
@@ -114,6 +114,14 @@
       "tinte queda a ~1.2:1 sobre blanco, es decir, invisible. WCAG pide >=3:1 para",
       "componentes no textuales, y una barra de grafica lo es.",
       "Ninguna 'marca' puede ser el verde institucional ni el acento (regla cromo/dato)."
+    ],
+    "_nota_hue": [
+      "SEPARACION DE TONO, no solo desigualdad de hex.",
+      "La primera version usaba #0F766E para 'cumple': 175 grados frente a los 147 del",
+      "primario institucional, solo 28 de separacion. Dos verdes contiguos — exactamente",
+      "la confusion cromo/dato que la seccion 8.2 existe para evitar, y la prueba no la",
+      "detectaba porque solo comparaba igualdad exacta de hex.",
+      "Regla: toda 'marca' debe caer FUERA de la banda del primario, +/-45 grados."
     ]
   },
   "logos": {
@@ -128,6 +136,7 @@
     "_doc": "Verificado por tests/test_design_tokens.py. Si un token baja de su mínimo, falla la suite.",
     "texto_normal": 4.5,
     "texto_grande": 3.0,
-    "componente_ui": 3.0
+    "componente_ui": 3.0,
+    "separacion_hue_minima": 45
   }
 }

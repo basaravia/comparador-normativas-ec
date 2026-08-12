@@ -299,3 +299,49 @@ class TestMarcaDeGrafica:
             assert colores["fg"] != colores["bg"], (
                 f"NIVEL_COLORS['{nivel}'] usa el mismo color para fg y bg"
             )
+
+
+class TestSeparacionDeTono:
+    """La marca de dato debe caer fuera de la banda de tono del cromo.
+
+    La primera versión usaba un teal a 28° del verde institucional: dos verdes
+    contiguos, que es justo la confusión cromo/dato que §8.2 evita. La prueba de
+    entonces solo comparaba igualdad exacta de hex, así que no lo veía — desigualdad
+    no es distinguibilidad.
+    """
+
+    @staticmethod
+    def _hue(hex_color: str) -> float:
+        import colorsys
+
+        h = hex_color.lstrip("#")
+        r, g, b = (int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
+        return colorsys.rgb_to_hls(r, g, b)[0] * 360
+
+    def _delta(self, a: str, b: str) -> float:
+        d = abs(self._hue(a) - self._hue(b))
+        return min(d, 360 - d)
+
+    def test_cada_marca_cae_fuera_de_la_banda_del_primario(self):
+        minimo = tokens.CONTRASTE_MINIMO["separacion_hue_minima"]
+        for nivel in tokens.NIVEL_ORDEN:
+            delta = self._delta(tokens.marca(nivel), tokens.PRIMARIO)
+            assert delta >= minimo, (
+                f"marca('{nivel}')={tokens.marca(nivel)} está a {delta:.0f}° del primario "
+                f"{tokens.PRIMARIO}, por debajo de los {minimo}° exigidos: se leerían como "
+                "el mismo color y el dato se confundiría con el cromo"
+            )
+
+    def test_tambien_frente_al_acento(self):
+        minimo = tokens.CONTRASTE_MINIMO["separacion_hue_minima"]
+        for nivel in tokens.NIVEL_ORDEN:
+            assert self._delta(tokens.marca(nivel), tokens.ACENTO) >= minimo
+
+    def test_el_ratio_documentado_de_la_marca_se_reproduce_desde_el_hex(self):
+        """`ratio_marca` era el único ratio del JSON sin prueba que lo recalculara."""
+        for nivel in tokens.NIVEL_ORDEN:
+            declarado = tokens.ESTADO[nivel]["ratio_marca"]
+            real = round(tokens.ratio_contraste(tokens.marca(nivel), "#ffffff"), 2)
+            assert abs(declarado - real) < 0.01, (
+                f"ratio_marca de '{nivel}' dice {declarado} y el hex da {real}"
+            )
