@@ -52,3 +52,40 @@ def _clean_streamlit_session_state():
 @pytest.fixture
 def app_path() -> str:
     return APP_PATH
+
+
+# ── Corpus sintético y dobles ─────────────────────────────────────────────
+# Ver tests/fixtures/corpus.py para los casos límite que el corpus construye.
+
+
+@pytest.fixture
+def normativa_df():
+    from tests.fixtures import normativa_df as _n
+    return _n()
+
+
+@pytest.fixture
+def manual_df():
+    from tests.fixtures import manual_df as _m
+    return _m()
+
+
+@pytest.fixture
+def fake_embeddings():
+    from tests.fixtures import FakeEmbeddingBackend
+    return FakeEmbeddingBackend()
+
+
+@pytest.fixture
+def fake_grader():
+    """Grader determinista. Para veredictos o fallos concretos, constrúyelo en la
+    prueba: `FakeGrader(veredictos={...}, fallar_en=...)`."""
+    from tests.fixtures import FakeGrader
+    return FakeGrader()
+
+
+@pytest.fixture
+def fake_index(normativa_df):
+    """Índice falso sin FAISS. El `plan` (embed_text -> element_ids) lo fija la prueba."""
+    from tests.fixtures import FakeIndex
+    return FakeIndex(normativa_df=normativa_df)
