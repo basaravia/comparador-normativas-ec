@@ -241,3 +241,83 @@ class TestUnVocabularioParaLosPrefijos:
             NormativaIndex.semantic_search
         )
         assert "passage_prefix" in fuente and "query_prefix" in fuente
+
+
+class TestCredencialParametrica:
+    """La credencial sale del entorno, no del código.
+
+    `build_chat_model` hardcodeaba `api_key="ignored"`. Válido mientras solo hubiera un
+    backend local sin autenticación, pero impedía apuntar el mismo cliente a un endpoint
+    remoto con token sin tocar código — que es justo lo que exige el DoD de P-a
+    ("configuración por entorno, nunca hardcodeada").
+    """
+
+    def test_la_clave_se_resuelve_desde_el_entorno(self, monkeypatch):
+        monkeypatch.setenv("LLM_API_KEY", "token-remoto-123")
+        spec = ProviderSpec(proveedor=Provider.OPENAI_COMPAT).resuelto()
+        assert spec.api_key == "token-remoto-123"
+
+    def test_sin_clave_no_falla_el_backend_local(self, monkeypatch):
+        """Un backend sin autenticación debe seguir funcionando sin configurar nada."""
+        monkeypatch.delenv("LLM_API_KEY", raising=False)
+        spec = ProviderSpec(proveedor=Provider.OPENAI_COMPAT).resuelto()
+        assert spec.api_key == ""
+
+    def test_la_ui_gana_al_entorno_tambien_para_la_clave(self, monkeypatch):
+        monkeypatch.setenv("LLM_API_KEY", "del-entorno")
+        spec = ProviderSpec(proveedor=Provider.OPENAI_COMPAT, api_key="de-la-ui").resuelto()
+        assert spec.api_key == "de-la-ui"
+
+    def test_el_alias_historico_sigue_siendo_el_mismo_proveedor(self):
+        """`Provider.DMR` lo nombran config.py, la UI y .env.example: no puede romperse."""
+        assert Provider.DMR is Provider.OPENAI_COMPAT
+
+    def test_la_clave_no_sobrevive_a_redact(self, monkeypatch):
+        clave = "sk-" + "abcdefghijklmnopqrstuvwxyz01"
+        monkeypatch.setenv("LLM_API_KEY", clave)
+        spec = ProviderSpec(proveedor=Provider.OPENAI_COMPAT).resuelto()
+        assert clave not in redact("conectando con api" + f"_key={spec.api_key}")
+
+
+class TestCosturaDelReranker:
+    """Tercera costura, junto a chat y embeddings (enmienda S9)."""
+
+    def test_devuelve_un_callable_para_el_remoto(self):
+        from src.providers import build_reranker
+
+        spec = ProviderSpec(
+            proveedor=Provider.RERANK_HTTP,
+            base_url="https://ejemplo.invalid/v1",
+            modelo="un-reranker",
+        )
+        puntuar = build_reranker(spec)
+        assert callable(puntuar), "la costura debe devolver (query, docs) -> scores"
+
+    def test_el_remoto_no_carga_torch(self):
+        """El motivo de la costura: en contenedor, torch son varios GB para reordenar
+        tres candidatos."""
+        import inspect
+
+        from src.providers import _reranker_http
+
+        assert "torch" not in inspect.getsource(_reranker_http)
+
+    def test_el_indice_no_construye_el_reranker_al_crearse(self, normativa_df):
+        """Antes el __init__ descargaba ~1.2 GB de pesos solo por crear un índice."""
+        from src.search_engine import NormativaIndex
+        from tests.fixtures import FakeEmbeddingBackend
+
+        idx = NormativaIndex(embedding_backend=FakeEmbeddingBackend(), use_reranker=True)
+        assert idx._puntuar is None, (
+            "el reranker se construyó en el constructor; debe diferirse al primer uso"
+        )
+
+    def test_el_indice_acepta_un_spec_de_reranker(self, normativa_df):
+        from src.search_engine import NormativaIndex
+        from tests.fixtures import FakeEmbeddingBackend
+
+        spec = ProviderSpec(proveedor=Provider.RERANK_HTTP, base_url="https://x.invalid")
+        idx = NormativaIndex(
+            embedding_backend=FakeEmbeddingBackend(), use_reranker=True, reranker_spec=spec,
+        )
+        assert idx._reranker_spec is spec

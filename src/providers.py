@@ -16,12 +16,14 @@ eso no puede quedar escrito a mano en el grader.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
 from .config import (
     DMR_BASE_URL,
+    RERANKER_MODEL,
     DMR_EMBED_MODEL,
     DMR_LLM_MODEL,
     EMBED_BATCH_SIZE,
@@ -30,6 +32,8 @@ from .config import (
 )
 from .errors import ProviderConfigError
 from .settings import faltantes, get
+
+logger = logging.getLogger(__name__)
 
 
 class Provider(str, Enum):
@@ -40,8 +44,20 @@ class Provider(str, Enum):
     sería prometer un camino que nadie ha recorrido.
     """
 
-    DMR = "dmr"              # backend local compatible con la API de OpenAI
-    LOCAL_ST = "local_st"    # sentence-transformers en proceso (solo embeddings)
+    # Endpoint que habla la API de OpenAI. Cubre el backend local (sin autenticación)
+    # y cualquier servicio compatible con credencial — entre ellos los endpoints
+    # serverless de Azure AI Foundry, que exponen esa misma interfaz. Lo único que
+    # cambia entre uno y otro es `base_url` y `api_key`, así que no necesitan cliente
+    # distinto: separarlos en dos proveedores duplicaría la fábrica sin motivo.
+    OPENAI_COMPAT = "openai_compat"
+
+    # Alias histórico del anterior. Se conserva porque `config.py`, la UI y el
+    # `.env.example` lo nombran; apunta a la misma fábrica.
+    DMR = "openai_compat"
+
+    LOCAL_ST = "local_st"    # sentence-transformers en proceso
+    RERANK_LOCAL = "rerank_local"      # CrossEncoder en proceso
+    RERANK_HTTP = "rerank_http"        # endpoint de reranking remoto
 
 
 @dataclass(frozen=True)
@@ -72,6 +88,19 @@ CAPACIDADES: dict[Provider, ProviderCapabilities] = {
         timeout_s=180,
         max_retries=0,
     ),
+    Provider.RERANK_LOCAL: ProviderCapabilities(
+        chat=False,
+        embeddings=False,
+        listado_modelos=False,
+        concurrencia_recomendada=1,
+    ),
+    Provider.RERANK_HTTP: ProviderCapabilities(
+        chat=False,
+        embeddings=False,
+        listado_modelos=False,
+        concurrencia_recomendada=4,
+        timeout_s=30,
+    ),
     Provider.LOCAL_ST: ProviderCapabilities(
         chat=False,
         embeddings=True,
@@ -100,6 +129,12 @@ class ProviderSpec:
     # timeouts dejaran de estar escritos a mano en el grader, y las capacidades solos no
     # bastan: son constantes por proveedor, y el grading y el análisis tienen
     # presupuestos distintos (2 min frente a 3) porque generan volúmenes distintos.
+    # Credencial del endpoint. None = se resuelve desde el entorno con `clave_env`.
+    # Nunca se escribe en config.py ni se hornea en la imagen del contenedor: es lo
+    # que permite apuntar el mismo cliente a un backend local sin autenticación o a
+    # un endpoint remoto con token, cambiando solo el entorno.
+    api_key: str | None = None
+    clave_env: str = "LLM_API_KEY"
     timeout_s: int | None = None
     max_retries: int | None = None
     extra: dict[str, Any] = field(default_factory=dict)
@@ -128,6 +163,8 @@ class ProviderSpec:
                 max_tokens=self.max_tokens,
                 batch_size=self.batch_size,
                 device=self.device,
+                api_key=get(self.clave_env, ui=self.api_key, default=""),
+                clave_env=self.clave_env,
                 timeout_s=self.timeout_s,
                 max_retries=self.max_retries,
                 extra=self.extra,
@@ -166,7 +203,10 @@ def build_chat_model(spec: ProviderSpec) -> Any:
         return ChatOpenAI(
             model=spec.modelo,
             base_url=spec.base_url,
-            api_key="ignored",          # el backend local no autentica
+            # "ignored" solo como último recurso: un backend local no autentica, pero
+            # uno remoto sí, y hornear la credencial aquí era justo lo que impedía
+            # apuntar a otro endpoint sin tocar código.
+            api_key=spec.api_key or "ignored",
             temperature=spec.temperature,
             max_tokens=spec.max_tokens,
             timeout=spec.timeout_efectivo,
@@ -212,8 +252,9 @@ def build_embedding_backend(spec: ProviderSpec) -> Any:
         from .embeddings import LangChainDMREmbeddings
 
         return LangChainDMREmbeddings(
-            model=spec.modelo or get("DMR_EMBED_MODEL", default=DMR_EMBED_MODEL),
-            base_url=spec.base_url or DMR_BASE_URL,
+            model=spec.modelo or get("EMBED_MODEL", default=DMR_EMBED_MODEL),
+            base_url=get("EMBED_BASE_URL", ui=spec.base_url, default=DMR_BASE_URL),
+            api_key=get("EMBED_API_KEY", ui=spec.api_key, default="") or "ignored",
             batch_size=spec.batch_size,
         )
 
@@ -226,6 +267,85 @@ def build_embedding_backend(spec: ProviderSpec) -> Any:
         )
 
     raise ProviderConfigError(f"Proveedor de embeddings no soportado: {spec.proveedor.value}")
+
+
+def build_reranker(spec: ProviderSpec) -> Any:
+    """Construye el reranker. Tercera costura, junto a chat y embeddings.
+
+    Antes esto vivía dentro de `NormativaIndex.__init__`, que importaba torch y
+    sentence-transformers y descargaba ~1.2 GB de pesos **solo por construir un índice**.
+    Dos consecuencias que esta costura corrige:
+
+      · no se podía usar un reranker remoto ni ninguno en absoluto sin pagar la carga
+        del local;
+      · en la Fase 2 esa dependencia engorda el contenedor en varios GB para reordenar
+        tres candidatos. Con el reranker fuera, la imagen de producción puede no llevar
+        torch en absoluto.
+
+    Enmienda el supuesto S9 del plan ("el reranker sigue siendo local con cualquier
+    proveedor"), escrito cuando ningún candidato de nube exponía reranking de forma
+    homogénea. Hoy sí los hay servibles por endpoint.
+
+    Devuelve un callable `(query, documentos) -> list[float]`.
+    """
+    spec = spec.resuelto()
+
+    if spec.proveedor is Provider.RERANK_HTTP:
+        validate(spec)
+        return _reranker_http(spec)
+
+    return _reranker_local(spec)
+
+
+def _reranker_local(spec: ProviderSpec):
+    """CrossEncoder en proceso. Import perezoso: arrastra torch."""
+    import torch
+    from sentence_transformers import CrossEncoder
+
+    device = spec.device
+    if device == "auto":
+        device = "mps" if torch.backends.mps.is_available() else "cpu"
+
+    model_kwargs = {"dtype": torch.float32}
+    if device == "mps":
+        # Qwen3-Reranker produce NaN en MPS con el kernel de atención optimizado
+        # (SDPA); "eager" evita ese bug de precisión.
+        model_kwargs["attn_implementation"] = "eager"
+
+    modelo = spec.modelo or RERANKER_MODEL
+    logger.info("Cargando reranker local: %s (device=%s)", modelo, device)
+    encoder = CrossEncoder(modelo, device=device, model_kwargs=model_kwargs)
+
+    def puntuar(query: str, documentos: list[str]) -> list[float]:
+        return [float(x) for x in encoder.predict([(query, d) for d in documentos])]
+
+    return puntuar
+
+
+def _reranker_http(spec: ProviderSpec):
+    """Endpoint de reranking remoto. Sin dependencias pesadas en el proceso."""
+    import httpx
+
+    url = f"{spec.base_url.rstrip('/')}/rerank"
+    cabeceras = {"Authorization": f"Bearer {spec.api_key}"} if spec.api_key else {}
+
+    def puntuar(query: str, documentos: list[str]) -> list[float]:
+        r = httpx.post(
+            url,
+            json={"model": spec.modelo, "query": query, "documents": documentos},
+            headers=cabeceras,
+            timeout=spec.timeout_efectivo,
+        )
+        r.raise_for_status()
+        datos = r.json().get("results", [])
+        # La respuesta viene ordenada por relevancia; se devuelve en el orden de
+        # entrada para que el llamador no tenga que saber cómo puntúa el proveedor.
+        puntos = [0.0] * len(documentos)
+        for item in datos:
+            puntos[item["index"]] = float(item.get("relevance_score", 0.0))
+        return puntos
+
+    return puntuar
 
 
 def list_models(spec: ProviderSpec) -> list[str]:

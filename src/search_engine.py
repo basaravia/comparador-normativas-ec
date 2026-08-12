@@ -60,28 +60,23 @@ class NormativaIndex:
         embedding_backend: EmbeddingBackend,
         use_reranker: bool = True,
         reranker_model: str = RERANKER_MODEL,
+        reranker_spec: object | None = None,
     ) -> None:
         self._backend = embedding_backend
         self._use_reranker = use_reranker
         self._index = None  # faiss.IndexFlatIP, lazy-loaded
         self._df: Optional[pd.DataFrame] = None
-        self._cross_encoder = None
 
-        if use_reranker:
-            # DMR/vllm-metal no soporta reranking mode en Apple Silicon —
-            # se usa un CrossEncoder local (sentence-transformers) en su lugar.
-            import torch
-            from sentence_transformers import CrossEncoder
-
-            device = "mps" if torch.backends.mps.is_available() else "cpu"
-            model_kwargs = {"dtype": torch.float32}
-            if device == "mps":
-                # Qwen3-Reranker produce NaN en MPS con el kernel de atención
-                # optimizado (SDPA); "eager" evita ese bug de precisión.
-                model_kwargs["attn_implementation"] = "eager"
-
-            logger.info("Cargando reranker local: %s (device=%s)", reranker_model, device)
-            self._cross_encoder = CrossEncoder(reranker_model, device=device, model_kwargs=model_kwargs)
+        # El reranker se construye **cuando se usa**, no aquí.
+        #
+        # Antes este constructor importaba torch y sentence-transformers y descargaba
+        # ~1.2 GB de pesos solo por crear un índice. Eso ataba dos cosas que no tienen
+        # por qué ir juntas: no se podía indexar sin pagar la carga del reranker, ni
+        # usar uno remoto. Y en la Fase 2 esa dependencia mete varios GB en el
+        # contenedor para reordenar tres candidatos.
+        self._reranker_spec = reranker_spec
+        self._reranker_model = reranker_model
+        self._puntuar = None
 
     # ── Construcción del índice ───────────────────────────────────────────
 
@@ -257,9 +252,15 @@ class NormativaIndex:
         return result
 
     def _call_reranker(self, query: str, documents: list[str]) -> list[float]:
-        """Puntúa cada documento contra la query con el CrossEncoder local."""
-        pairs = [(query, doc) for doc in documents]
-        return [float(s) for s in self._cross_encoder.predict(pairs)]
+        """Puntúa cada documento contra la query. Construye el reranker al primer uso."""
+        if self._puntuar is None:
+            from .providers import Provider, ProviderSpec, build_reranker
+
+            spec = self._reranker_spec or ProviderSpec(
+                proveedor=Provider.RERANK_LOCAL, modelo=self._reranker_model,
+            )
+            self._puntuar = build_reranker(spec)
+        return self._puntuar(query, documents)
 
     # ── Escaneo léxico ───────────────────────────────────────────────────
 
