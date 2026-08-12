@@ -179,7 +179,29 @@ Azure se toman con evidencia.
 ### 3.3 Restricciones de "no cerrar puertas"
 
 Esta es la disciplina que hace barato el fasado. Cada punto cuesta casi nada en la Fase 1 y es
-lo que evita reescribir en la 2 y la 3. **Son de cumplimiento obligatorio en toda la Fase 1.**
+lo que evita reescribir en la 2 y la 3.
+
+> **Cómo se verifican** *(decidido el 2026-08-12, tras la auditoría de la Ola 1)*
+>
+> Son **criterio de cierre de fase**, no invariante por PR: se exigen ciertas al terminar
+> la Fase 1, no en cada rama. La redacción original decía "obligatorio en toda la Fase 1"
+> mientras §7 asignaba las dos primeras a ramas de la Ola 2 — una contradicción que en la
+> práctica se resolvió sola, en silencio y a favor de la lectura laxa.
+>
+> El precio de esta lectura es que la deuda tiene que estar **declarada y con dueño**, o
+> deja de ser deuda y pasa a ser un olvido:
+>
+> | Restricción | Estado al cerrar la Ola 1 | Dueño |
+> |---|---|---|
+> | 1 · `workspace_id` | Sin aplicar. Cero apariciones en el repo; `index_meta.json` nació sin él | `feature/coverage-model` (ítem 5) — `CoverageLink` debe nacer con él |
+> | 2 · Rutas por corrida | Sin aplicar. `output/comparador/*` sigue fijo | `feature/service-layer` (Ola 2) |
+> | 3 · Sin estado global | ✓ | — |
+> | 4 · Config por entorno | Mecanismo sí, cableado a medias: la UI no pasa por `settings` | `feature/service-layer` |
+> | 5 · Sin construcción directa de clientes | ✓ en `src/` desde `fix/provider-wiring`; `streamlit_app.py` pendiente | `feature/service-layer` |
+> | 6 · Nada de macOS fuera de su sitio | ✓ desde `src/bootstrap.py` | — |
+> | 7 · Cómputo independiente del proceso | n/a hasta el ítem 3 | `feature/run-manager` |
+>
+> **Ninguna de estas puede seguir abierta al cerrar la Fase 1**: §14 las da por ciertas.
 
 1. **`workspace_id` en el modelo de datos desde el primer día**, aunque siempre valga `"local"`.
    Añadir el campo ahora a `CoverageLink`, al manifest del checkpoint y al papel de trabajo es
@@ -411,13 +433,38 @@ Los tres defectos de §2.2 (1–3), que el ítem 6 necesita funcionando:
 
 - `DocumentComparator.__init__` recibe `min_semantic_score` y `_process_row()` lo pasa a
   `semantic_search()` (`src/comparator.py:178`). El slider del sidebar deja de ser decorativo.
-- `lexical_scan()` acota el match por `doc_id` para no cruzar normativas
-  (`src/search_engine.py:188-220`).
-- Se restauran los prefijos `passage:`/`query:` del backend local (`src/search_engine.py:99,136`).
+- `lexical_scan()` distingue las citas ambiguas de las firmes para no cruzar normativas
+  (ver la enmienda de abajo).
+- Se restauran los prefijos `passage:`/`query:` del backend local, declarados **por el
+  backend** y no fijados por el índice.
+
+> **Enmienda del criterio del defecto 2** *(decidida el 2026-08-12; el DoD original decía
+> "ningún artículo de la norma A aparece ligado por vía léxica a una sección que citaba la
+> norma B")*
+>
+> Cuando el manual cita "Art. 5" y ese número existe en dos normativas cargadas, hay tres
+> salidas y dos son malas: devolver ambas como citas firmes fabrica una arista de
+> cobertura falsa; elegir una arbitrariamente fabrica una cita que el texto no respalda.
+>
+> **La adoptada es la tercera: etiquetar, no descartar.** Se emiten como
+> `match_type="ambiguo"`, con score reducido y una razón. Descartarlas —que fue la primera
+> implementación— borraba el hecho de que el manual *sí* cita un artículo, y ese hecho lo
+> necesitan el modelo N:N (ítem 5), la cobertura de la Vía 2 (ítem 6) —donde un artículo
+> realmente citado aparecería como huérfano y produciría una brecha inexistente contra la
+> premisa del Bloque A— y el flag de revisión manual (ítem 10).
+>
+> El motor de búsqueda no es la capa que decide tirar evidencia. Y es lo que pide el
+> Bloque A: la herramienta marca y explica, no resuelve lo que no puede resolver.
+>
+> **La etiqueta obliga aguas abajo**, no solo en el buscador: una cita ambigua no cuenta
+> para `tipo_coincidencia`, llega al prompt declarada como indicio no confirmado, y viaja
+> a la fila en `articulos_lexicos_ambiguos`, separada de `articulos_lexicos`. Sin eso, el
+> comportamiento visible sería idéntico al defecto original.
 
 **DoD** — Cambiar el umbral en el sidebar altera el número de candidatos de una corrida.
-Con dos normativas cargadas, ningún artículo de la norma A aparece ligado por vía léxica a una
-sección que citaba la norma B.
+Con dos normativas cargadas, ningún artículo de la norma A queda ligado **como cita
+léxica firme** a una sección cuyo número también pertenece a la norma B; si lo está, es
+como `ambiguo` y así se declara en el resultado y en el prompt.
 
 **Tests** — `tests/test_config_wiring.py`, `tests/test_lexical_isolation.py`.
 
@@ -458,8 +505,11 @@ endpoints hardcodeados. `.env` ya está en `.gitignore`.
 Un índice FAISS construido con un modelo y cargado con otro se rechaza con mensaje explícito.
 Ninguna credencial sobrevive a `redact()` en logs ni en el Excel.
 
-**Tests** — `tests/test_providers.py` (construcción con env mockeado, precedencia),
-`tests/test_settings_redaction.py`, `tests/test_index_meta.py`. Todo sin red.
+**Tests** — `tests/test_providers.py` (construcción con env mockeado, precedencia,
+redacción de secretos) y `tests/test_index_meta.py`. Todo sin red.
+
+> *La redacción se probó dentro de `test_providers.py::TestRedaccionDeSecretos` en vez de
+> en un archivo aparte; el contenido exigido está, el nombre del archivo no aporta.*
 
 ---
 
