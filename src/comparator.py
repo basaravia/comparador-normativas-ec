@@ -9,9 +9,15 @@ Fases por sección del manual:
 
 Columnas generadas en el DataFrame de salida:
   articulos_lexicos, articulos_semanticos_raw, articulos_validados,
-  tipo_coincidencia, nivel_cumplimiento,
+  tipo_coincidencia, nivel_cumplimiento, estado_analisis,
   analisis_lexico, analisis_semantico_top1/2/3, analisis_general,
   brechas, ner_general, entidades_financieras, entidades_normativas
+
+`estado_analisis` ∈ {ok, error_modelo, error_parseo, omitido} es **independiente** de
+`nivel_cumplimiento` (supuesto S2 del plan). Un fallo técnico nunca se expresa como un
+veredicto de cumplimiento: cuando el análisis no se pudo hacer, `nivel_cumplimiento` es
+None y el motivo va en `estado_analisis`. Antes todo fallo salía como "no_aplica", que
+es un veredicto legítimo —"se miró y no hay norma aplicable"— y confundía las dos cosas.
 """
 from __future__ import annotations
 
@@ -26,6 +32,12 @@ from tqdm import tqdm
 from .llm_grader import ComparisonResult, LLMGrader
 from .search_engine import NormativaIndex
 from .config import FAISS_TOP_K, MAX_WORKERS, RERANKER_TOP_N
+from .errors import (
+    ComparadorError,
+    LLMUnavailableError,
+    RunAbortedError,
+    classify_llm_exception,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,11 +57,16 @@ class DocumentComparator:
         llm_grader: LLMGrader,
         top_k_faiss: int = FAISS_TOP_K,
         top_n_rerank: int = RERANKER_TOP_N,
+        max_fallos_consecutivos: int = 3,
     ) -> None:
         self.index = normativa_index
         self.grader = llm_grader
         self.top_k_faiss = top_k_faiss
         self.top_n_rerank = top_n_rerank
+        # Tres fallos de fila seguidos dejan de parecer casualidad: casi siempre es el
+        # modelo degradandose, no las secciones. Configurable porque el umbral util
+        # depende del tamano de la corrida.
+        self.max_fallos_consecutivos = max_fallos_consecutivos
 
     # ── API pública ───────────────────────────────────────────────────────
 
@@ -77,25 +94,107 @@ class DocumentComparator:
         rows = manual_df.to_dict("records")
         results: dict[int, dict] = {}
         total = len(rows)
+        fallos_consecutivos = 0
+        abortar: ComparadorError | None = None
+
+        # Envío acotado, no todo de golpe.
+        #
+        # Con `submit()` de las N filas por adelantado, `cancel_futures=True` solo puede
+        # cancelar lo que aún no arrancó — y si el trabajo es rápido, para cuando el
+        # bucle detecta el fallo ya se ejecutó todo. La cancelación quedaba a merced de
+        # que el modelo fuese lento, que es justo lo que no se puede asumir.
+        #
+        # Manteniendo una ventana de tareas en vuelo, la corrida deja de enviar en
+        # cuanto hay que abortar. Además evita retener en memoria una tarea por sección
+        # en corridas de cientos de filas.
+        ventana = max(max_workers * 2, 2)
+        pendientes = iter(enumerate(rows))
+        completed = 0
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
-                executor.submit(self._process_row, row, normativa_df): i
-                for i, row in enumerate(rows)
-            }
-            with tqdm(total=len(futures), desc=desc, unit="sección", colour="cyan") as pbar:
-                for completed, future in enumerate(as_completed(futures), start=1):
-                    idx = futures[future]
+            futures: dict = {}
+
+            def _rellenar() -> None:
+                while len(futures) < ventana:
+                    try:
+                        i, row = next(pendientes)
+                    except StopIteration:
+                        return
+                    futures[executor.submit(self._process_row, row, normativa_df)] = i
+
+            _rellenar()
+
+            with tqdm(total=total, desc=desc, unit="sección", colour="cyan") as pbar:
+                while futures:
+                    hecho = next(as_completed(list(futures)))
+                    idx = futures.pop(hecho)
+                    future = hecho
+                    completed += 1
                     try:
                         results[idx] = future.result()
+                        fallos_consecutivos = 0
                     except Exception as e:
-                        logger.error("Error en fila %d: %s", idx, e)
-                        results[idx] = {**rows[idx], **self._empty_result()}
+                        error = classify_llm_exception(e)
+
+                        if isinstance(error, LLMUnavailableError):
+                            # No tiene sentido seguir: el backend no va a mejorar en la
+                            # fila siguiente. Se cancela lo pendiente en vez de gastar
+                            # minutos generando filas vacías (ítem 1).
+                            logger.error("Fila %d abortó la corrida: %s", idx, error)
+                            # Esta fila falló; no se la deja caer en el relleno de
+                            # "omitido" de abajo, que significa "nadie la miró".
+                            results[idx] = {**rows[idx], **self._empty_result("error_modelo")}
+                            abortar = error
+                            executor.shutdown(wait=False, cancel_futures=True)
+                            break
+
+                        # Error de contenido: degrada solo esta fila y sigue.
+                        logger.warning("Fila %d degradada: %s", idx, error)
+                        results[idx] = {**rows[idx], **self._empty_result("error_parseo")}
+                        fallos_consecutivos += 1
+
+                        if fallos_consecutivos >= self.max_fallos_consecutivos:
+                            # Varios fallos seguidos dejan de parecer casualidad: casi
+                            # siempre es el modelo degradándose, no las secciones.
+                            logger.error(
+                                "%d fallos consecutivos: se aborta la corrida",
+                                fallos_consecutivos,
+                            )
+                            abortar = error
+                            executor.shutdown(wait=False, cancel_futures=True)
+                            break
+
                     pbar.update(1)
                     if progress_callback is not None:
                         progress_callback(completed, total, results[idx])
 
-        return pd.DataFrame([results[i] for i in range(len(rows))])
+                    # Solo se envía más trabajo si la corrida sigue viva.
+                    _rellenar()
+
+        # Las filas que nunca llegaron a procesarse quedan explícitamente como omitidas.
+        # No son "no aplica": nadie las miró, y el papel de trabajo debe poder decirlo.
+        for i, row in enumerate(rows):
+            results.setdefault(i, {**row, **self._empty_result("omitido")})
+
+        df = pd.DataFrame([results[i] for i in range(len(rows))])
+
+        if abortar is not None:
+            analizadas = sum(
+                1 for r in results.values() if r.get("estado_analisis") != "omitido"
+            )
+            error = RunAbortedError(
+                f"Corrida detenida tras {analizadas}/{total} secciones: {abortar}",
+                completadas=analizadas,
+                total=total,
+                causa=abortar,
+            )
+            # Los resultados parciales viajan con la excepción: se han pagado en tiempo
+            # de LLM y perderlos por un fallo al final sería gratuito. La UI los muestra
+            # etiquetados como parciales.
+            error.parciales = df
+            raise error
+
+        return df
 
     def run_sample(
         self,
@@ -189,6 +288,7 @@ class DocumentComparator:
 
         return {
             **row,
+            "estado_analisis": "ok",
             # Búsqueda
             "articulos_lexicos":         [m.get("numero") for m in lexical],
             "articulos_semanticos_raw":  [
@@ -219,18 +319,26 @@ class DocumentComparator:
         }
 
     @staticmethod
-    def _empty_result() -> dict:
+    def _empty_result(estado: str = "error_parseo") -> dict:
+        """Fila sin análisis utilizable.
+
+        `nivel_cumplimiento` es **None**, no "no_aplica" (supuesto S2). La diferencia no
+        es cosmética: "no aplica" es un veredicto —significa que se miró la sección y no
+        hay norma que le aplique— y usarlo para señalar un fallo técnico convierte un
+        error en una afirmación de auditoría. El motivo real viaja en `estado_analisis`.
+        """
         return {
             "articulos_lexicos": [],
             "articulos_semanticos_raw": [],
             "articulos_validados": [],
-            "tipo_coincidencia": "ninguna",
-            "nivel_cumplimiento": "no_aplica",
+            "tipo_coincidencia": None,
+            "nivel_cumplimiento": None,
+            "estado_analisis": estado,
             "analisis_lexico": None,
             "analisis_semantico_top1": None,
             "analisis_semantico_top2": None,
             "analisis_semantico_top3": None,
-            "analisis_general": "Error en procesamiento",
+            "analisis_general": None,
             "brechas": [],
             "ner_general": [],
             "entidades_financieras": [],

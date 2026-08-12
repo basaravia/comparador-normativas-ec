@@ -30,6 +30,7 @@ from .config import (
     LLM_MAX_TOKENS,
     LLM_TEMPERATURE,
 )
+from .errors import AnalysisParseError, LLMUnavailableError, classify_llm_exception
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +175,12 @@ class LLMGrader:
         max_tokens: int = LLM_MAX_TOKENS,
         grader_max_tokens: int = LLM_GRADER_MAX_TOKENS,
     ) -> None:
+        # Se guardan para que classify_llm_exception pueda decir *qué* modelo y *qué*
+        # endpoint fallaron: el mensaje del ítem 1 tiene que ser accionable, y
+        # "el backend no responde" sin decir cuál no lo es.
+        self._model_id = model
+        self._base_url = base_url
+
         self._llm_grader = ChatOpenAI(
             model=model,
             base_url=base_url,
@@ -230,7 +237,21 @@ class LLMGrader:
                 "candidates_text": candidates_text,
             })
         except Exception as e:
-            logger.warning("Grading falló (%s). Se asumen todos relevantes.", e)
+            error = classify_llm_exception(e, modelo=self._model_id, url=self._base_url)
+            if isinstance(error, LLMUnavailableError):
+                # El backend no va a responder mejor en la fila siguiente: se relanza
+                # para que run() cancele lo pendiente en vez de seguir produciendo
+                # veredictos sobre secciones que el modelo nunca leyó (ítem 1).
+                logger.error("Grading abortado por fallo de infraestructura: %s", error)
+                raise error from e
+
+            # Fallo de contenido: degrada solo esta fila.
+            #
+            # NOTA — el default `relevante=True` sigue aquí a propósito: cambiarlo a
+            # None es alcance del ítem 4, que además añade los reintentos de
+            # reparación del JSON antes de darse por vencido. Tocarlo aquí rompería
+            # `_process_row`, que filtra con `.get("relevante", True)`.
+            logger.warning("Grading no parseable (%s). Se asumen todos relevantes.", error)
             return [{**c, "relevante": True, "score_grade": 0.5, "razon_grade": ""} for c in candidates]
 
         grade_map = {g.element_id: g for g in result.candidatos}
@@ -288,12 +309,22 @@ class LLMGrader:
             result.tipo_coincidencia = tipo
             return result
         except Exception as e:
-            logger.error("Análisis falló para '%s': %s", jerarquia, e)
-            return ComparisonResult(
-                tipo_coincidencia=tipo,
-                nivel_cumplimiento="no_aplica",
-                analisis_general=f"Error en análisis LLM: {e}",
-            )
+            error = classify_llm_exception(e, modelo=self._model_id, url=self._base_url)
+            if isinstance(error, LLMUnavailableError):
+                logger.error("Análisis abortado en '%s' por fallo de infraestructura: %s",
+                             jerarquia, error)
+                raise error from e
+
+            # Fallo de contenido. Antes se devolvía nivel_cumplimiento="no_aplica" con el
+            # texto del error dentro de analisis_general: el papel de trabajo afirmaba
+            # "no aplica" sobre una sección que nadie analizó. Ahora se relanza como
+            # error de parseo y es run() quien decide qué hacer con la fila, marcándola
+            # con estado_analisis en vez de con un veredicto de cumplimiento (S2).
+            logger.error("Análisis no parseable para '%s': %s", jerarquia, error)
+            raise AnalysisParseError(
+                f"El análisis de '{jerarquia}' no encaja en el esquema: {error}",
+                causa=e,
+            ) from e
 
     # ── Helpers privados ─────────────────────────────────────────────────
 
