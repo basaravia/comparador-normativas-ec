@@ -125,6 +125,11 @@ class TestFirmaConBackendsReales:
         import json
         from unittest.mock import patch
 
+        # `patch` necesita que el módulo exista para sustituirlo, y sentence-transformers
+        # no está en el entorno mínimo de CI (arrastra torch, varios GB). Se salta ahí y
+        # corre en desarrollo, que es donde este backend se usa de verdad.
+        pytest.importorskip("sentence_transformers")
+
         with patch("sentence_transformers.SentenceTransformer"):
             from src.embeddings import SentenceTransformersEmbeddings
             backend = SentenceTransformersEmbeddings(device="cpu")
