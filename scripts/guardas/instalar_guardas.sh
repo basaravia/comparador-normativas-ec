@@ -47,9 +47,29 @@ if ! grep -qs 'filter=nbstrip' .gitattributes 2>/dev/null; then
 fi
 
 # ── 2 · pre-commit: escanea lo que está a punto de commitearse ────────────────
+# Resolutor de la ruta del escáner, compartido por los tres hooks.
+#
+# Los hooks viven en .git/ y se comparten entre TODAS las ramas y worktrees, pero el
+# escáner es un archivo del árbol: en una rama donde scripts/guardas/ aún no existe
+# —main, por ejemplo— la ruta fija falla y bloquea el push. Se prueban las dos
+# ubicaciones y solo se aborta si no hay ninguna, que es cuando de verdad no se puede
+# validar nada.
+read -r -d '' RESOLVER <<'RES' || true
+_scan() {
+  local raiz="$1"
+  for cand in "$raiz/scripts/guardas/scan_confidencial.py" "$raiz/.claude/scripts/scan_confidencial.py"; do
+    [[ -f "$cand" ]] && { echo "$cand"; return 0; }
+  done
+  echo "ERROR: no se encuentra scan_confidencial.py; las guardas no pueden validar nada." >&2
+  return 1
+}
+RES
+
 cat > "$HOOKS/pre-commit" <<HOOK
 #!/usr/bin/env bash
-exec ${PY} "${PRINCIPAL}/scripts/guardas/scan_confidencial.py" --staged
+${RESOLVER}
+S="\$(_scan "${PRINCIPAL}")" || exit 1
+exec ${PY} "\$S" --staged
 HOOK
 
 # ── 3 · commit-msg: el vector que ya falló una vez (c48b85f) ─────────────────
@@ -57,13 +77,17 @@ HOOK
 # archivos lo mira: `git log -S` busca en contenidos, no en mensajes.
 cat > "$HOOKS/commit-msg" <<HOOK
 #!/usr/bin/env bash
-exec ${PY} "${PRINCIPAL}/scripts/guardas/scan_confidencial.py" "\$1"
+${RESOLVER}
+S="\$(_scan "${PRINCIPAL}")" || exit 1
+exec ${PY} "\$S" "\$1"
 HOOK
 
 # ── 4 · pre-push: última compuerta antes de lo público ───────────────────────
 cat > "$HOOKS/pre-push" <<HOOK
 #!/usr/bin/env bash
-exec ${PY} "${PRINCIPAL}/scripts/guardas/scan_confidencial.py" --push
+${RESOLVER}
+S="\$(_scan "${PRINCIPAL}")" || exit 1
+exec ${PY} "\$S" --push
 HOOK
 
 chmod +x "$HOOKS/pre-commit" "$HOOKS/commit-msg" "$HOOKS/pre-push"
