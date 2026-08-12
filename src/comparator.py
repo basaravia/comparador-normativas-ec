@@ -15,9 +15,16 @@ Columnas generadas en el DataFrame de salida:
 
 `estado_analisis` ∈ {ok, error_modelo, error_parseo, omitido} es **independiente** de
 `nivel_cumplimiento` (supuesto S2 del plan). Un fallo técnico nunca se expresa como un
-veredicto de cumplimiento: cuando el análisis no se pudo hacer, `nivel_cumplimiento` es
-None y el motivo va en `estado_analisis`. Antes todo fallo salía como "no_aplica", que
-es un veredicto legítimo —"se miró y no hay norma aplicable"— y confundía las dos cosas.
+veredicto de cumplimiento: cuando el análisis no se pudo hacer, `nivel_cumplimiento` queda
+vacío y el motivo va en `estado_analisis`. Antes todo fallo salía como "no_aplica", que es
+un veredicto legítimo —"se miró y no hay norma aplicable"— y confundía las dos cosas.
+
+**`estado_analisis` es el campo autoritativo, no la ausencia del nivel.** Para saber si una
+fila tiene veredicto hay que mirar `estado_analisis == "ok"`, nunca `nivel_cumplimiento is
+None`: pandas 3.0 cambió la inferencia de dtype y una columna de strings con None pasa de
+`object` (donde None sobrevive) a `str` (donde se vuelve NaN). El mismo código da `None` en
+pandas 2.3 y `NaN` en 3.0, así que cualquier comparación con `is None` sobre un valor
+sacado del DataFrame es frágil. Si hace falta comprobar el nivel, `pd.isna()`.
 """
 from __future__ import annotations
 

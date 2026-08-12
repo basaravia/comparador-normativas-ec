@@ -362,8 +362,21 @@ class LLMGrader:
             logger.debug("Grading nivel 1 falló (%s); se intenta reparar la salida", error)
 
         # Nivel 2 — OutputFixingParser: le pide al propio modelo que arregle su JSON.
+        #
+        # Vive en el paquete paraguas `langchain`, no en `langchain-core`. Si no está
+        # instalado se salta este nivel y se pasa al siguiente: un import opcional que
+        # falta no puede tumbar una corrida de auditoría, y sin este guardia el
+        # ModuleNotFoundError se clasificaba como fallo de infraestructura y abortaba
+        # todo (detectado al correr la suite en un entorno mínimo).
         try:
             from langchain.output_parsers import OutputFixingParser
+        except ImportError:
+            logger.debug("langchain.output_parsers no disponible; se salta el nivel 2")
+            OutputFixingParser = None  # type: ignore[assignment]
+
+        try:
+            if OutputFixingParser is None:
+                raise GradingParseError("nivel 2 no disponible")
 
             reparador = OutputFixingParser.from_llm(
                 parser=PydanticOutputParser(pydantic_object=GradingResult),

@@ -129,8 +129,25 @@ class TestDegradacionPorFila:
 
         assert len(out) == len(manual_df), "la corrida debía terminar pese al fallo de una fila"
         fallida = out[out["jerarquia"] == objetivo].iloc[0]
+
+        # `estado_analisis` es el campo autoritativo: es un string y siempre está.
         assert fallida["estado_analisis"] == "error_parseo"
-        assert fallida["nivel_cumplimiento"] is None
+
+        # Para el nivel se usa pd.isna(), no `is None`.
+        #
+        # pandas 3.0 cambió la inferencia de dtype: una columna de strings con None pasa
+        # de `object` (donde None sobrevive) a `str` (donde se convierte en NaN). Con
+        # `is None` esta prueba pasa en pandas 2.3 y falla en 3.0 con el mismo código —
+        # así se detectó, corriendo la suite en dos entornos.
+        #
+        # La lección va más allá de la prueba: ningún código del proyecto debe usar
+        # `is None` sobre un valor sacado de un DataFrame. Lo que significa "sin
+        # veredicto" lo dice `estado_analisis`, no la ausencia del nivel.
+        import pandas as pd
+        assert pd.isna(fallida["nivel_cumplimiento"]), (
+            "una fila degradada conserva un nivel de cumplimiento; el veredicto debe "
+            "quedar vacío y el motivo vivir en estado_analisis"
+        )
 
     def test_tres_fallos_seguidos_abortan(self, normativa_df, manual_df):
         """Varios fallos consecutivos dejan de parecer casualidad.

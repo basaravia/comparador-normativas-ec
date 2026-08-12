@@ -40,15 +40,22 @@ jobs:
       # ocrmac NO puede instalarse aquí: es macOS-only (arrastra pyobjc) y
       # rompería el pip install en Linux. Es el mismo bloqueante documentado
       # para la Fase 2 en PLAN_MEJORAS_ANEXO.md §9.
-      # Lista verificada contra un entorno limpio, no deducida: son los únicos
-      # imports a nivel de módulo de src/ y app/. docling, faiss, torch y
-      # sentence-transformers son import perezoso dentro de funciones, así que
-      # la suite rápida no los necesita.
+      # Lista verificada contra un entorno limpio, no deducida.
+      #
+      # docling, torch y sentence-transformers NO se instalan: pesan varios GB y solo
+      # los necesitan el parseo de PDFs y el reranker, que van marcados @pytest.mark.e2e.
+      #
+      # faiss-cpu SÍ, aunque sea import perezoso: las pruebas del índice (metadatos del
+      # backend, umbral de score, prefijos de embedding) construyen un NormativaIndex de
+      # verdad. Sin él, 12 pruebas fallan — que es como se descubrió esta lista.
+      #
+      # langchain (el paraguas, no solo -core) lo necesita OutputFixingParser en el
+      # reintento de reparación del grading.
       - name: Instalar dependencias de prueba
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pandas numpy tqdm openpyxl pydantic \
-                      langchain-core langchain-openai streamlit altair
+          pip install pytest pandas numpy tqdm openpyxl pydantic faiss-cpu \
+                      langchain langchain-core langchain-openai streamlit altair
 
       - name: Suite rápida
         run: pytest -q
