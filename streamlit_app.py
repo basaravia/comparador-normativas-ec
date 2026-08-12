@@ -368,6 +368,7 @@ with tab_compare:
                 llm_grader=grader,
                 top_k_faiss=config["faiss_top_k"],
                 top_n_rerank=config["reranker_top_n"],
+                min_semantic_score=config["min_semantic_score"],
             )
             st.session_state["comparator"] = comparator
 
