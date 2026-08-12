@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feature/**", "fix/**", "chore/**", "test/**"]
+  pull_request:
+    branches: [main, feature/comparador-v2]
+
+# Solo la corrida más reciente de cada rama; las anteriores se cancelan.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/ruff-action@v3
+        with:
+          args: check --output-format=github
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      # El entorno completo (torch, docling, faiss) no se instala en CI: pesa
+      # varios GB y las pruebas de la suite rápida no lo necesitan. Las que sí
+      # dependen de él van marcadas @pytest.mark.e2e y quedan deseleccionadas
+      # por el addopts de pyproject.toml.
+      #
+      # ocrmac NO puede instalarse aquí: es macOS-only (arrastra pyobjc) y
+      # rompería el pip install en Linux. Es el mismo bloqueante documentado
+      # para la Fase 2 en PLAN_MEJORAS_ANEXO.md §9.
+      # Lista verificada contra un entorno limpio, no deducida: son los únicos
+      # imports a nivel de módulo de src/ y app/. docling, faiss, torch y
+      # sentence-transformers son import perezoso dentro de funciones, así que
+      # la suite rápida no los necesita.
+      - name: Instalar dependencias de prueba
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pandas numpy tqdm openpyxl pydantic \
+                      langchain-core langchain-openai streamlit altair
+
+      - name: Suite rápida
+        run: pytest -q
+
+  # NOTA DELIBERADA — la compuerta de confidencialidad no vive aquí.
+  #
+  # Este repositorio es PÚBLICO. Un escaneo en CI corre *después* del push,
+  # cuando el material ya es visible para cualquiera: sirve para detectar, no
+  # para prevenir. La prevención está en los hooks locales de git
+  # (pre-commit, commit-msg, pre-push) más el filtro que quita las salidas de
+  # los notebooks antes de que entren al índice.
+  #
+  # Instalación:  bash .claude/scripts/instalar_guardas.sh
+  #
+  # Añadir aquí un escaneo como red secundaria es razonable, pero nunca debe
+  # presentarse como la compuerta: crea una falsa sensación de cobertura
+  # justo en el punto donde ya es tarde.

@@ -9,7 +9,6 @@ También aplica el mismo workaround de OpenMP que ``streamlit_app.py`` y
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 
 # Mismo workaround que streamlit_app.py: evita crash nativo en Apple Silicon
@@ -22,16 +21,9 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 APP_PATH = str(REPO_ROOT / "streamlit_app.py")
 
-# Garantiza que `import src` / `import app` funcionen sin importar desde
-# dónde se invoque pytest.
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-
-def pytest_configure(config: pytest.Config) -> None:
-    config.addinivalue_line(
-        "markers", "e2e: pruebas end-to-end lentas que requieren DMR real (Docker Model Runner)"
-    )
+# `import src` / `import app` los resuelve `pythonpath` en pyproject.toml, y los
+# marcadores se declaran ahí mismo con --strict-markers. Antes ambas cosas vivían
+# aquí: un sys.path.insert y un pytest_configure que ya no hacen falta.
 
 
 @pytest.fixture(autouse=True)

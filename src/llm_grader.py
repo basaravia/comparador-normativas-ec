@@ -15,12 +15,9 @@ Flujo por sección del manual:
 """
 from __future__ import annotations
 
-import json
 import logging
-import re
 from typing import Literal, Optional
 
-import pandas as pd
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI

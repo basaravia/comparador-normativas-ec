@@ -1,3 +1,16 @@
+# ┌───────────────────────────────────────────────────────────────────────────┐
+# │  NO USAR PARA REPLICAR EL ENTORNO.                                        │
+# │                                                                           │
+# │  Esto es un freeze histórico de un entorno de desarrollo compartido: ~300 │
+# │  paquetes, la mayoría ajenos a este proyecto. Se conserva solo como       │
+# │  registro de qué versiones convivían cuando se validó el pipeline.        │
+# │                                                                           │
+# │  El entorno real del proyecto es:                                         │
+# │      conda env create -f dependencies/environment.yml                     │
+# │      conda activate normas_comparador                                     │
+# │                                                                           │
+# │  (lista mínima curada; ver dependencies/README.md)                        │
+# └───────────────────────────────────────────────────────────────────────────┘
 name: normas-comparador
 channels:
   - conda-forge
