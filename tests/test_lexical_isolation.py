@@ -75,40 +75,62 @@ class TestNumeroNoAmbiguoSigueFuncionando:
 class TestAislamientoEntreNormativasDistintas:
     """El caso del defecto 2: el mismo número existe en dos normativas."""
 
-    def test_numero_ambiguo_no_genera_match_hacia_ninguna_normativa(self, fake_index, normativa_df):
+    def test_numero_ambiguo_no_genera_ninguna_cita_firme(self, fake_index, normativa_df):
+        """Ni ambas como ciertas, ni una elegida a dedo.
+
+        Se emiten etiquetados: descartarlos borraría el hecho de que el manual sí cita
+        un artículo, y ese hecho lo necesitan el modelo N:N, la cobertura de la Vía 2 y
+        el flag de revisión manual.
+        """
         numero = COBERTURA_ESPERADA["numero_ambiguo"]
         assert numero == "5"
 
-        matches = fake_index.lexical_scan(f"Conforme al Art. {numero}, se hace tal cosa.", normativa_df=normativa_df)
-
-        assert matches == [], (
-            f"el Art. {numero} existe en LEY-A y en RES-B; el manual no dice de cuál. "
-            "No debe generar match léxico hacia ninguna de las dos (ni ambas, ni una "
-            "elegida arbitrariamente)."
+        matches = fake_index.lexical_scan(
+            f"Conforme al Art. {numero}, se hace tal cosa.", normativa_df=normativa_df
         )
 
-    def test_seccion_real_del_corpus_que_cita_el_numero_ambiguo_queda_sin_match_lexico(
+        assert matches, "descartar el match borra el dato de que el manual cita un artículo"
+        assert all(m["match_type"] == "ambiguo" for m in matches), (
+            f"el Art. {numero} existe en LEY-A y en RES-B y el manual no dice de cuál: "
+            "ninguno puede presentarse como cita exacta"
+        )
+        assert all(m["similarity"] < 1.0 for m in matches), (
+            "un match ambiguo no puede puntuar como una cita inequívoca"
+        )
+        assert all(m["razon_match"] for m in matches), (
+            "la ambigüedad debe venir explicada, no solo señalada"
+        )
+
+    def test_la_seccion_real_del_corpus_marca_su_cita_como_ambigua(
         self, fake_index, normativa_df, manual_df
     ):
         seccion = _seccion(manual_df, "2.2 Registro y conservación")
 
         matches = fake_index.lexical_scan(seccion["texto"], normativa_df=normativa_df)
 
-        assert matches == []
+        assert {m["match_type"] for m in matches} == {"ambiguo"}
 
-    def test_ningun_articulo_de_ley_a_queda_ligado_a_la_seccion_que_comparte_numero_con_res_b(
+    def test_ningun_articulo_queda_ligado_como_cita_firme_a_esa_seccion(
         self, fake_index, normativa_df, manual_df
     ):
         """DoD del plan: con dos normativas cargadas, ningún artículo de la norma A
-        aparece ligado por vía léxica a una sección cuyo número también pertenece a
-        la norma B (y viceversa)."""
+        aparece ligado *por vía léxica firme* a una sección cuyo número también
+        pertenece a la norma B (y viceversa).
+
+        La arista existe, pero declarada como ambigua: es la diferencia entre afirmar
+        una cobertura y registrar un indicio.
+        """
         seccion = _seccion(manual_df, "2.2 Registro y conservación")
 
         matches = fake_index.lexical_scan(seccion["texto"], normativa_df=normativa_df)
 
-        doc_ids_matcheados = {m["doc_id"] for m in matches}
-        assert DOC_LEY not in doc_ids_matcheados
-        assert DOC_RES not in doc_ids_matcheados
+        firmes = [m for m in matches if m["match_type"] == "exacto"]
+        assert not firmes, (
+            f"estos artículos se presentan como cita firme sin que el texto lo respalde: "
+            f"{[(m['doc_id'], m['numero']) for m in firmes]}"
+        )
+        # Y las dos normativas están representadas, no una elegida arbitrariamente.
+        assert {m["doc_id"] for m in matches} == {DOC_LEY, DOC_RES}
 
     def test_otras_secciones_del_manual_no_se_ven_afectadas_por_la_ambiguedad_de_otra(
         self, fake_index, normativa_df, manual_df

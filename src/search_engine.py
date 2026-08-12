@@ -266,22 +266,34 @@ class NormativaIndex:
         siempre dice de cuál habla ("Conforme al Art. 5, se mantiene el
         registro…", sin nombrar la norma).
 
-        Ante esa ambigüedad, esta función **no** devuelve los artículos de las
-        dos normativas (generaría una arista de cobertura falsa hacia la
-        normativa que el manual no citó) ni elige uno de forma arbitraria
-        (fabricaría una cita que el texto no respalda: no hay ningún criterio
-        textual para preferir una norma sobre otra). El criterio adoptado:
+        Ante esa ambigüedad hay tres salidas, y dos son malas: devolver los
+        artículos de las dos normativas como citas firmes genera una arista de
+        cobertura falsa hacia la que el manual no citó; elegir una de forma
+        arbitraria fabrica una cita que el texto no respalda. El criterio
+        adoptado es la tercera:
 
           · Si el número identifica un único artículo entre todas las
-            normativas cargadas → hay match léxico, igual que antes.
-          · Si el número lo comparten artículos de ≥2 normativas (`doc_id`)
-            distintas → se descarta el match léxico para ese número: no queda
-            ligado a ninguna. La sección no se queda sin analizar: la vía
-            semántica (embeddings + reranker + grading LLM) sigue evaluándola
-            contra el índice completo, y a diferencia del regex sí tiene el
-            contenido del artículo — no solo su número — para decidir con
-            evidencia trazable a cuál corresponde. Se prefiere "sin match
-            léxico" a "match léxico equivocado o inventado".
+            normativas cargadas → `match_type="exacto"`, `similarity=1.0`.
+          · Si lo comparten artículos de ≥2 normativas (`doc_id`) distintas →
+            se emiten igualmente, pero como `match_type="ambiguo"` con
+            `similarity=0.5` y una `razon_match` que explica por qué.
+
+        **Etiquetar, no descartar.** El motor de búsqueda no es la capa que
+        debe decidir tirar evidencia. Descartar el match parece prudente pero
+        borra el hecho de que el manual sí cita un artículo, y ese hecho le
+        hace falta a quien viene después: al modelo N:N del ítem 5, que puede
+        registrar la arista con origen y confianza propios; a la cobertura de
+        la Vía 2 (ítem 6), donde un artículo realmente citado aparecería como
+        huérfano y produciría una brecha inexistente contra la premisa de
+        cobertura del Bloque A; y al flag de revisión manual del ítem 10, para
+        el que una cita ambigua es exactamente el caso que debe marcarse.
+
+        Es además lo que pide el Bloque A: la herramienta marca y explica, no
+        resuelve automáticamente lo que no puede resolver con evidencia.
+
+        La vía semántica sigue evaluando la sección con el contenido completo
+        del artículo, no solo su número, así que la desambiguación real ocurre
+        donde hay contexto para hacerla.
         """
         df = normativa_df if normativa_df is not None else self._df
         if df is None:
@@ -315,22 +327,30 @@ class NormativaIndex:
         for (_, row), numero in zip(df_arts.iterrows(), numeros):
             if numero not in found_numbers:
                 continue
-            if docs_por_numero is not None and docs_por_numero.get(numero, 1) > 1:
+
+            es_ambiguo = docs_por_numero is not None and docs_por_numero.get(numero, 1) > 1
+            if es_ambiguo:
                 ambiguos.add(numero)
-                continue
+
             matches.append({
                 **row.to_dict(),
-                "match_type": "exacto",
-                "similarity": 1.0,
+                "match_type": "ambiguo" if es_ambiguo else "exacto",
+                # Un match ambiguo no puede valer lo mismo que una cita inequívoca:
+                # con 1.0 competiría de tú a tú con la evidencia buena en el ranking.
+                "similarity": 0.5 if es_ambiguo else 1.0,
                 "rank": len(matches) + 1,
+                "razon_match": (
+                    f"El texto cita 'Art. {numero}' sin nombrar la normativa, y ese número "
+                    f"existe en {docs_por_numero.get(numero)} normativas cargadas"
+                    if es_ambiguo else ""
+                ),
             })
 
         if ambiguos:
             logger.info(
-                "lexical_scan: %d número(s) de artículo ambiguo(s) entre "
-                "normativas distintas, sin match léxico automático (%s). "
-                "El texto cita el número pero no la normativa; queda a la "
-                "vía semántica resolverlo con contexto.",
+                "lexical_scan: %d número(s) compartido(s) entre normativas (%s). "
+                "Se emiten como match_type='ambiguo' para que quien decida tenga el dato, "
+                "no como cita firme.",
                 len(ambiguos), ", ".join(sorted(ambiguos)),
             )
 
