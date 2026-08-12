@@ -37,6 +37,30 @@
 > - **R1** — al abortar, las filas ya analizadas dentro de la ventana en vuelo se marcan
 >   `omitido`. Con `MAX_WORKERS=1` la exposición es una fila.
 >
+> ### Parametrización de modelos · `feature/provider-params` (2026-08-12)
+>
+> **Hecho.** Los tres modelos —LLM, embeddings y reranker— se apuntan a cualquier endpoint
+> compatible con la API de OpenAI cambiando solo el `.env`, sin tocar código:
+>
+> - `api_key` deja de estar hardcodeada a `"ignored"`. Era un atajo válido con un único
+>   backend local sin autenticación, y era **lo único que impedía** probar contra un
+>   endpoint remoto con token.
+> - `Provider.OPENAI_COMPAT` sustituye conceptualmente a `DMR` (que queda como alias): un
+>   backend local y un endpoint serverless remoto hablan la misma API, así que comparten
+>   fábrica. Separarlos en dos proveedores duplicaría el constructor sin motivo.
+> - **Tercera costura**, `build_reranker(spec)` — ver S9 enmendado.
+>
+> **Pendiente, para cuando haya recursos aprovisionados (Fase 3 · P-b):**
+>
+> - Autenticación por **Managed Identity** en lugar de clave. En producción no debe haber
+>   ninguna credencial que filtrar; lo de ahora es para desarrollo y pruebas.
+> - Validación contra un recurso real: hoy la fábrica remota está probada con dobles y
+>   contra el backend local, no contra un endpoint de nube vivo.
+> - `list_models` para endpoints remotos: el preflight del ítem 4 depende del listado, y
+>   no todos los proveedores lo exponen igual.
+> - Estimación de costo por corrida (`costo_1m_tokens`), que con endpoints de pago deja de
+>   ser opcional. Ítem 18 del anexo.
+>
 > ---
 >
 > **Estado original: PROPUESTA — pendiente de aprobación.** *(conservado como registro)*
@@ -287,7 +311,7 @@ lo que evita reescribir en la 2 y la 3.
 | S6 | Hardware de la Fase 1 | M1 16 GB con DMR local: `max_workers` bajo, checkpoints frecuentes, evaluación de retrieval sin LLM. |
 | S7 | Proveedor | **DMR local es el default de desarrollo; Azure lo será de producción.** No son alternativas opt-in: son entornos distintos del mismo sistema. En Fase 1 solo existe DMR. |
 | S8 | LLM y embeddings se eligen por separado | Se formaliza en P-a que el backend de LLM y el de embeddings son independientes y combinables. En Fase 1 ambos apuntan a DMR o al backend local de sentence-transformers. |
-| S9 | Reranker | **Local (`CrossEncoder`) en Fase 1.** En Fase 3 se reevalúa: mantener un CrossEncoder en CPU dentro del contenedor es la pieza más pesada del stack y Azure ofrece reranking como servicio. |
+| S9 | Reranker | **ENMENDADO 2026-08-12: parametrizable, local por defecto.** La redacción original ("siempre local con cualquier proveedor") se escribió cuando ningún candidato de nube exponía reranking homogéneo; hoy los hay servibles por endpoint. `providers.build_reranker(spec)` es la tercera costura, junto a chat y embeddings, y el índice ya no lo construye en su `__init__`: eso ataba indexar a cargar ~1.2 GB de pesos, e impedía que el contenedor de Fase 2 prescindiera de torch para reordenar tres candidatos. |
 | S10 | UI de la Fase 1 | **Streamlit se conserva como vista delgada**, no se rediseña. Montar SPA + API para un usuario en una Mac retrasaría el piloto sin añadirle capacidad. La condición es que `feature/service-layer` se haga igual: con la orquestación fuera de la UI, la Fase 2 reescribe presentación, no lógica. |
 | S11 | Frontend de la Fase 2 | **Vite + React + TypeScript**, monorepo, tipos generados desde el OpenAPI de FastAPI. Los modelos Pydantic pasan a ser los tipos del frontend — otra razón para que `CoverageLink` esté temprano y estable. |
 | S12 | Identidad del cliente | El repositorio **no identifica al cliente**. El nombre sale de `ORG_DISPLAY_NAME` (`app/theme.py:9-11`) y los valores de marca de `assets/brand/brand.json`, ambos fuera de git. Es la postura establecida en el commit `32710e5` y se mantiene. |
@@ -1016,9 +1040,36 @@ No se detalla hasta cerrar la Fase 1. Lo que ya se sabe:
    de imagen y de RAM residente. Condiciona el SKU y el arranque en frío, y es lo que obliga a
    reevaluar S9.
 
+> **Requisito de red — la URL del backend de modelos no puede hornearse en la imagen.**
+>
+> `localhost:12434` desde dentro de un contenedor apunta **al propio contenedor**, no al
+> host: se rompe en cuanto se containeriza. Arquitectónicamente ya está resuelto —las tres
+> URLs (LLM, embeddings, reranker) salen de `settings`, no del código— pero la imagen debe
+> construirse **sin default** y recibirlas por entorno.
+>
+> | Dónde vive el modelo | URL desde el contenedor |
+> |---|---|
+> | En el host (Docker Desktop) | `http://host.docker.internal:12434/engines/v1` |
+> | Model Runner de Docker Desktop | nombre interno propio — **verificar en la instalación**, varía por versión |
+> | Otro servicio del mismo compose | `http://<servicio>:12434/engines/v1` |
+> | Endpoint remoto compatible con OpenAI | la URL pública del recurso |
+>
+> Es el mismo mecanismo en los cuatro casos: ese es el rédito de que P-a sacara la
+> construcción del cliente fuera del motor.
+
+> **Aclaración de alcance.** El cambio de tecnología es **solo de la capa de presentación**.
+> El pipeline entero —parsing, FAISS, grading, análisis, Excel— sigue en Python, la
+> orquestación sigue en Python (`src/service.py`) y la API sigue en Python (FastAPI). Node
+> aparece únicamente en la etapa de *build* del Dockerfile para compilar el frontend a
+> estáticos; el contenedor que corre en producción es un runtime de Python. Además, los
+> tipos de TypeScript se generan desde el OpenAPI de FastAPI: los modelos Pydantic **son**
+> los tipos del frontend, que es un consumidor del contrato, no una segunda fuente.
+
 **Alcance**
 
 - `Dockerfile` multi-stage (build de Node → runtime de Python), `requirements` por plataforma.
+- **Imagen sin torch si el reranker es remoto**: la costura de S9 lo permite y quita varios
+  GB. Con reranker local, torch entra y el SKU sube.
 - `api/` con FastAPI sobre `src/service.py`: contrato OpenAPI, SSE para progreso.
 - `frontend/` con Vite + React + TypeScript; tipos generados desde el OpenAPI
   (`openapi-typescript` + `openapi-fetch`), de modo que los modelos Pydantic **son** los tipos

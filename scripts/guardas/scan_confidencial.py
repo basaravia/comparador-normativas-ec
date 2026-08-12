@@ -191,7 +191,7 @@ def revisar_rutas(rutas: list[str], dl: dict) -> list:
 
 def _git(*args) -> list[str]:
     r = subprocess.run(["git", *args], capture_output=True, text=True, cwd=REPO)
-    return [l for l in r.stdout.splitlines() if l.strip()]
+    return [linea for linea in r.stdout.splitlines() if linea.strip()]
 
 
 def archivos(argv: list[str]) -> tuple[list[str], str, bool]:
