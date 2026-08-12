@@ -40,6 +40,12 @@ Informe_*.docx
 # deliberada y por archivo, no una apertura del patrón.
 !PLAN_MEJORAS_ANEXO.md
 
+# Identidad visual del cliente: paleta real y logotipos NO se versionan.
+# Solo se versiona el placeholder genérico, que es el fallback de un clon limpio
+# (ver PLAN_MEJORAS_ANEXO.md §8.4 y el supuesto S12).
+assets/brand/*
+!assets/brand/_placeholder/
+
 # Artefactos generados por el pipeline (regenerables, no commitar)
 output/comparador/
 output/**/*.xlsx
