@@ -1,6 +1,45 @@
 # Plan de trabajo — Ítems 1 a 10 del Anexo, en tres fases
 
-> **Estado: PROPUESTA — pendiente de aprobación.** Ninguna rama ni código se ha creado todavía.
+> ## Estado de ejecución · 2026-08-12
+>
+> **Fase 1 · Olas 0 y 1 cerradas.** Trabajo en `feature/comparador-v2`
+> (`origin/feature/comparador-v2`); `main` conserva el baseline. **175 pruebas en
+> verde** en el entorno de desarrollo y en uno mínimo equivalente al de CI.
+>
+> | Ola | Rama | Ítem | Estado |
+> |-----|------|------|--------|
+> | 0 | `chore/project-scaffold` | R | ✅ `pyproject.toml`, CI, sin hacks de `sys.path` |
+> | 0 | `test/pipeline-fixtures` | R, S5 | ✅ Corpus sintético, dobles, contrato del notebook fijado |
+> | 1 | `fix/llm-failfast` | **1** | ✅ |
+> | 1 | `fix/config-wiring` | **§2.2 (1-3)** | ✅ |
+> | 1 | `feature/provider-seams` + `fix/provider-wiring` | **P-a** | ✅ |
+> | 1 | `feature/model-registry` | **4** | ✅ |
+> | 1 | `feature/design-tokens` | **T** | ✅ (incluye el ítem 14 del anexo) |
+> | 2 | `feature/service-layer`, `feature/run-manager` | 2, 3 | ⬜ Siguiente |
+> | 3 | `coverage-model`, `dual-analysis`, `scope-selector`, `review-flag` | 5, 6, 7, 10 | ⬜ |
+> | 4 | `semantic-chunking`, `papel-trabajo` | 8, 9 | ⬜ |
+>
+> **Los diez ítems del anexo siguen en la Fase 1.** Las fases 2 y 3 no añaden capacidad
+> analítica.
+>
+> ### Deuda declarada al cerrar la Ola 1
+>
+> Salió de la auditoría del 2026-08-12 (ver §3.3 para el criterio de verificación):
+>
+> - **§3.3.1 `workspace_id`** — sin aplicar. `CoverageLink` debe nacer con él en el ítem 5.
+> - **§3.3.2 rutas por corrida** — sin aplicar; `output/comparador/*` sigue fijo.
+>   Dueño: `feature/service-layer`.
+> - **§3.3.4/5 en la UI** — `streamlit_app.py` sigue construyendo sus backends y no pasa
+>   por `settings`. Dueño: `feature/service-layer`. En `src/` ya está resuelto.
+> - **Deriva de referencias** — las citas `archivo:línea` de §2 y §7 apuntan a código que
+>   se movió. Al ejecutar la Ola 2, verificar contra el símbolo (`_build_embedding_backend`,
+>   `LLMGrader.__init__`), no contra el número de línea.
+> - **R1** — al abortar, las filas ya analizadas dentro de la ventana en vuelo se marcan
+>   `omitido`. Con `MAX_WORKERS=1` la exposición es una fila.
+>
+> ---
+>
+> **Estado original: PROPUESTA — pendiente de aprobación.** *(conservado como registro)*
 > Reemplaza la versión del 2026-08-11, que planteaba una única entrega contra Streamlit + DMR.
 > Fuentes: `Informe_Consolidado_Comparador_Normativo.docx` (con la definición completa de la
 > "doble vía") + sus 5 capturas · decisiones de producto del 2026-08-12 (fasado, destino de
@@ -30,10 +69,10 @@
 
 | # | Ítem | Blq. | Prioridad | Fase | Dependencia |
 |---|------|------|-----------|------|-------------|
-| 1 | Detener el proceso cuando falle la conexión al modelo (no marcar todo `no_aplica` con el error embebido) | B | Alta | 1 | — |
+| 1 | Detener el proceso cuando falle la conexión al modelo (no marcar todo `no_aplica` con el error embebido) | B | Alta | 1 | **✅ HECHO** |
 | 2 | Corregir desincronización de estado al refrescar/cambiar de pestaña en una corrida | C | Alta | 1 | — |
 | 3 | Checkpoints y recuperación de procesos largos interrumpidos | C | Alta | 1 | Ítem 2 |
-| 4 | Validar modelos disponibles + no asumir "todo relevante" al fallar el parseo del grading | B | Alta | 1 | P-a |
+| 4 | Validar modelos disponibles + no asumir "todo relevante" al fallar el parseo del grading | B | Alta | 1 | **✅ HECHO** |
 | 5 | Modelo de datos artículo↔sección **N:N** en proceso y resultado | A | Alta | 1 | — |
 | 6 | **Análisis en doble vía**: (1) por sección del manual → cumplimiento + alerta; (2) por artículo de la normativa → cobertura/adopción + brechas | A | Alta | 1 | Ítem 5 |
 | 7 | Selector de alcance por lista (artículos/secciones), no solo por cantidad | A/B | Alta | 1 | Ítem 5 · S1 |
@@ -357,6 +396,8 @@ Al cerrar las cuatro olas, un único PR `feature/comparador-v2` → `main`.
 
 #### R1 — Andamiaje del proyecto · `chore/project-scaffold` · ~1.5 j
 
+> **✅ HECHO · `chore/project-scaffold`**
+
 - **`pyproject.toml`**: metadatos, `[tool.pytest.ini_options]` con los marcadores (`e2e`,
   `retrieval`), `[tool.ruff]`, y `src`/`app` como paquetes para eliminar el `sys.path.insert`
   de `tests/conftest.py:26`.
@@ -372,6 +413,8 @@ Al cerrar las cuatro olas, un único PR `feature/comparador-v2` → `main`.
 **DoD** — `pytest` corre sin el hack de `sys.path`; el CI falla ante un secreto commiteado.
 
 #### R2 — Fixtures y dobles del pipeline · `test/pipeline-fixtures` · ~1.5 j
+
+> **✅ HECHO · `test/pipeline-fixtures`**
 
 - `tests/fixtures/`: mini-corpus sintético versionado (normativa de ~12 artículos de dos
   normas distintas + manual de ~8 secciones) que ejercita los casos límite: artículo huérfano,
@@ -389,6 +432,8 @@ Al cerrar las cuatro olas, un único PR `feature/comparador-v2` → `main`.
 ### Ola 1 · Fiabilidad
 
 #### Ítem 1 — Fail-fast ante caída del modelo · `fix/llm-failfast` · ~1.5 j
+
+> **✅ HECHO · `fix/llm-failfast` · 14 pruebas**
 
 **Problema (captura 1):** las 5 secciones salen `no_aplica` con `Error en análisis LLM: error
 while getting model …` incrustado en `analisis_general`. El auditor recibe un papel de trabajo
@@ -428,6 +473,8 @@ queda como `no_aplica`; el Excel/JSON nunca contiene un mensaje de error en `ana
 ---
 
 #### §2.2 — Cableado de configuración · `fix/config-wiring` · ~1 j
+
+> **✅ HECHO · `fix/config-wiring` · 21 pruebas**
 
 Los tres defectos de §2.2 (1–3), que el ítem 6 necesita funcionando:
 
@@ -472,6 +519,8 @@ como `ambiguo` y así se declara en el resultado y en el prompt.
 
 #### Ítem P-a — Costuras de proveedor · `feature/provider-seams` · ~1 j
 
+> **✅ HECHO · `feature/provider-seams` + `fix/provider-wiring` · 30 pruebas**
+
 **Alcance reducido respecto del plan anterior.** No se escribe ningún backend de nube. Se
 construye únicamente la costura que permite añadirlos en la Fase 3 sin refactorizar.
 
@@ -515,6 +564,8 @@ redacción de secretos) y `tests/test_index_meta.py`. Todo sin red.
 
 #### Ítem 4 — Validación de modelos + grading sin falsos positivos · `feature/model-registry` · ~1 j
 
+> **✅ HECHO · `feature/model-registry` · 16 pruebas**
+
 **Problema (capturas 3 y 4):** `Field required: candidatos … Se asumen todos relevantes.` Al
 cambiar de modelo, el parseo falla y **todo candidato pasa como relevante** — el riesgo espejo
 del ítem 1: allí se pierden secciones, aquí se cuelan falsos positivos de cumplimiento.
@@ -546,6 +597,8 @@ Forzar un fallo de parseo → 0 candidatos marcados `relevante=True`; la fila ap
 ---
 
 #### Ítem T — Tokens de diseño · `feature/design-tokens` · ~0.5 j
+
+> **✅ HECHO · `feature/design-tokens` · 42 pruebas**
 
 **Problema:** §2.2 defecto 5 — la paleta está duplicada a mano entre `app/theme.py:38-43` y
 `src/comparator.py:137-142`, y la paleta actual es un placeholder que el propio docstring de
@@ -1068,7 +1121,7 @@ aplicación en el tenant (requiere administrador); postura del banco sobre resid
 | `dependencies/requirements.txt` | **P-a**, 2 | `python-dotenv` pasa de declarado a usado; `streamlit>=1.59` |
 | `.gitignore` | **T**, S12 | `assets/brand/` excepto `_placeholder/` |
 | `README.md` | todos | Arquitectura, fases, configuración |
-| `TODO.md` | todos | Reemplazado por el seguimiento de este plan |
+| `TODO.md` | todos | **✅ Eliminado.** Sus dos pendientes están cubiertos: el OCR con menos exigencia de hardware en §9 y en las costuras de parser/OCR de P-a; los logs, hechos y documentados en el README |
 
 ---
 

@@ -3,6 +3,11 @@
 Pipeline RAG de 5 fases que extrae, indexa y compara normativas ecuatorianas contra
 manuales internos bancarios para identificar brechas de cumplimiento normativo.
 
+> **Estado:** olas 0 y 1 de la Fase 1 cerradas. El diagrama refleja el código en
+> `feature/comparador-v2`. Las fases 2 y 3 del plan (contenedor + frontend, y nube)
+> cambian el envoltorio y el sitio donde corre, no el pipeline: ver
+> `PLAN_MEJORAS_ANEXO.md` §9 y §10.
+
 ## Diagrama General
 
 ```mermaid
@@ -48,7 +53,7 @@ flowchart TD
 
     %% ── FASE 5 ────────────────────────────────────────────────────────
     subgraph FASE5["FASE 5 — Orquestación   src/comparator.py"]
-        ORC["DocumentComparator\nThreadPoolExecutor · MAX_WORKERS=1\ntqdm progress bar\n~2–4 min/chunk × 135 chunks\n≈ 360 min total en M1 16GB"]
+        ORC["DocumentComparator\nEnvío ACOTADO: ventana de max_workers×2\ntareas en vuelo, no todas encoladas\nfail-fast en cascada + estado_analisis\n~2–4 min/chunk en M1 16GB"]
     end
 
     %% ── Docker Model Runner ───────────────────────────────────────────
@@ -56,9 +61,24 @@ flowchart TD
         direction LR
         ME["Embeddings\ngranite-embedding-multilingual\nqwen3-embedding"]
         MG["LLM Principal\ngemma4 latest\nCoT reasoning"]
-        MR["Reranker\nqwen3-reranker-vllm 0.6B"]
         MF["LLM Fallback\nsmollm2-vllm 1.7B"]
         MG -.->|"error / timeout"| MF
+    end
+
+    %% ── Reranker: LOCAL, no en el backend remoto ──────────────────────
+    subgraph RERANK["Reranker — en proceso"]
+        MR["CrossEncoder local\nsentence-transformers\nMPS con dtype=float32 + attn eager\n(el backend remoto no soporta\nreranking en Apple Silicon)"]
+    end
+
+    %% ── Capa transversal (Ola 1) ──────────────────────────────────────
+    subgraph TRANS["Transversal   src/"]
+        direction TB
+        PROV["providers.py\nÚNICO sitio que construye\nclientes de modelo"]
+        SET["settings.py\n.env · precedencia\nredact() de secretos"]
+        ERR["errors.py\nabortar vs. degradar"]
+        REG["model_registry.py\npreflight + list models"]
+        TOK["design_tokens.py\npaleta única UI + Excel"]
+        BOOT["bootstrap.py\nworkarounds de proceso"]
     end
 
     %% ── Caché y Persistencia ──────────────────────────────────────────
@@ -91,7 +111,15 @@ flowchart TD
     EMB -.->|"POST /embeddings"| ME
     GRD -.->|"POST /chat/completions"| MG
     ANA -.->|"POST /chat/completions"| MG
-    RNK -.->|"POST /rerank"| MR
+    RNK --> MR
+
+    %% ── La capa transversal gobierna las llamadas ─────────────────────
+    PROV -.->|"construye"| EMB
+    PROV -.->|"construye"| GRD
+    SET  -.->|"configura"| PROV
+    REG  -.->|"valida antes de arrancar"| PROV
+    ERR  -.->|"clasifica fallos"| ORC
+    TOK  -.->|"colores"| XLSX
 ```
 
 ## Stack Tecnológico
@@ -103,7 +131,7 @@ flowchart TD
 | Embeddings | granite-embedding-multilingual | 768d (default) |
 | Embeddings HQ | qwen3-embedding | 2560d |
 | Vector Search | FAISS IndexFlatIP | 1.14.2 |
-| Reranker | qwen3-reranker-vllm | 0.6B |
+| Reranker | CrossEncoder local (sentence-transformers) | Qwen3-Reranker 0.6B |
 | LLM Principal | gemma4 | latest (CoT) |
 | LLM Fallback | smollm2-vllm | 1.7B |
 | Validación salida | Pydantic | ≥2.10.0 |
@@ -114,10 +142,19 @@ flowchart TD
 
 ```
 src/
-├── config.py            # Endpoints DMR, umbrales, parámetros globales
+│  ── Pipeline ──────────────────────────────────────────────────────────
 ├── document_parser.py   # Fase 1: NormativaParser + ManualParser
-├── embeddings.py        # Backends: LangChainDMREmbeddings + SentenceTransformers
-├── search_engine.py     # Fase 2: NormativaIndex (FAISS + léxica + reranker)
+├── embeddings.py        # Backends + LangChainEmbeddingsAdapter genérico
+├── search_engine.py     # Fase 2: NormativaIndex (FAISS + léxico + reranker)
 ├── llm_grader.py        # Fases 3+4: LLMGrader + modelos Pydantic
-└── comparator.py        # Fase 5: DocumentComparator (orquestador concurrente)
+├── comparator.py        # Fase 5: DocumentComparator (orquestador concurrente)
+│
+│  ── Transversal (Ola 1) ────────────────────────────────────────────────
+├── bootstrap.py         # Preparación del proceso; se aplica al importarse
+├── config.py            # Defaults NO sensibles (deja de ser fuente de credenciales)
+├── settings.py          # .env, precedencia UI>entorno>.env>config, redact()
+├── providers.py         # ProviderSpec + fábricas: ÚNICO constructor de clientes
+├── errors.py            # Taxonomía: qué aborta la corrida y qué degrada una fila
+├── model_registry.py    # list/validate models + preflight con caché de 15 s
+└── design_tokens.py     # Fuente única de paleta y tipografía (UI + Excel)
 ```
