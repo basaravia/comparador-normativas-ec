@@ -432,6 +432,7 @@ entidades nombradas, para encontrar filiales que la denylist aún no conozca.
 | Fase 5 | 16–17 | `DocumentComparator.run_sample()` + `.run()` completo |
 | Resultados | 18–20 | Resumen estadístico, omisiones críticas, exportación Excel/JSON |
 | Uso modular | 21–22 | Carga de índice existente + análisis incremental |
+| **Fase 6** | **38–52** | **Verificación de subsanaciones** — cada celda demuestra un defecto corregido, contrastándolo con el comportamiento anterior. Corre en segundos con el corpus sintético: no necesita `document_test/` ni un modelo vivo |
 
 > **Nota Fase 1.1:** La celda actual itera sobre `NORMATIVA_DIR.glob("*.pdf")`, lo que incluye `L1-XVI-cap-*.pdf` (no en caché). Mientras esos PDFs no estén pre-cacheados, usar `parse_pdf()` explícitamente sobre los 5 stems cacheados para evitar el segfault MPS al intentar convertirlos.
 
