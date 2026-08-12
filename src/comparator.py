@@ -297,7 +297,15 @@ class DocumentComparator:
 
         # Phase 3: Grading de candidatos semánticos
         graded = self.grader.grade_candidates(text, reranked)
-        validated = [c for c in graded if c.get("relevante", True)]
+        # `is True`, no truthiness con default True. Tras el ítem 4, `relevante` puede
+        # ser None —el grading no pudo determinarlo— y un candidato indeterminado no
+        # entra al análisis como si estuviera validado. El default optimista de antes
+        # era justamente lo que colaba falsos positivos de cumplimiento.
+        validated = [c for c in graded if c.get("relevante") is True]
+
+        # Los indeterminados no se pierden: se cuentan y viajan a la fila para que el
+        # flag de revisión manual (ítem 10) tenga de dónde tirar.
+        indeterminados = [c for c in graded if c.get("relevante") is None]
 
         # Phase 4: Análisis comparativo profundo
         analysis: ComparisonResult = self.grader.analyze_comparison(row, lexical, validated)
@@ -305,6 +313,9 @@ class DocumentComparator:
         return {
             **row,
             "estado_analisis": "ok",
+            # Candidatos que el grading no pudo determinar. Insumo del ítem 10.
+            "candidatos_indeterminados": len(indeterminados),
+            "requiere_revision": bool(indeterminados),
             # Búsqueda
             "articulos_lexicos":         [m.get("numero") for m in lexical],
             "articulos_semanticos_raw":  [
