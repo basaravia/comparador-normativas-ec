@@ -1,0 +1,67 @@
+[project]
+name = "comparador-normativas-ec"
+version = "0.2.0"
+description = "Comparador automatizado de normativas ecuatorianas vs. manuales internos"
+requires-python = ">=3.11"
+readme = "README.md"
+
+# Las dependencias reales viven en dependencies/requirements.txt y
+# dependencies/environment.yml. No se duplican aquí: el entorno se construye con
+# conda por las restricciones de Apple Silicon (torch/faiss/docling), y mantener
+# dos listas en paralelo garantiza que se desincronicen.
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["src", "app"]
+
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+
+# Sustituye al sys.path.insert de tests/conftest.py: hace importables `src` y `app`
+# sin que cada prueba tenga que manipular el path.
+pythonpath = ["."]
+
+markers = [
+    "e2e: pruebas end-to-end lentas que requieren un backend de modelos real",
+    "retrieval: evaluación de recuperación en español; corre sin LLM pero necesita embeddings",
+]
+
+# La suite por defecto no incluye las lentas. Para correrlas: pytest -m e2e
+addopts = "-m 'not e2e' --strict-markers"
+
+filterwarnings = [
+    "ignore::DeprecationWarning:streamlit.*",
+]
+
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+exclude = [".claude", "output", "Normativa2026", "*.ipynb"]
+
+[tool.ruff.lint]
+# Conjunto por defecto de ruff: pyflakes (F) + los subconjuntos de pycodestyle que
+# señalan errores reales (E4 imports, E7 sentencias, E9 sintaxis).
+#
+# Deliberadamente NO se activa E501 (longitud de línea): los separadores de sección
+# del código (`# ── API pública ──…`) usan caracteres de dibujo y pasan de 180
+# columnas siendo comentarios decorativos. Marcarlos llenaría el CI de ruido
+# cosmético el primer día y la reacción natural sería desactivar el linter entero.
+#
+# Este conjunto es un piso, no un techo: se puede endurecer (I para imports, B para
+# bugbear, UP para modernización) cuando la Ola 0 esté cerrada y el diff no compita
+# con el trabajo de los ítems.
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# Los scripts validate_nb*.py replican deliberadamente la estructura del notebook
+# que validan, celda por celda: imports a media altura (E402) tras el bloque de
+# configuración, y nombres de variable de una letra en los bucles (E741). Alinearlos
+# con el estilo del resto rompería la correspondencia visual con el notebook, que es
+# justo lo que los hace revisables.
+"validate_nb*.py" = ["F401", "E402", "E741"]

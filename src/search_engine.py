@@ -9,12 +9,10 @@ NormativaIndex:
 from __future__ import annotations
 
 import re
-import json
 import logging
 from pathlib import Path
 from typing import Optional
 
-import numpy as np
 import pandas as pd
 
 # faiss se importa lazy (en build/load) para evitar conflicto de libs nativas con Docling

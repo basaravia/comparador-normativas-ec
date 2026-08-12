@@ -265,7 +265,10 @@ class NormativaParser:
         if not text:
             return ""
         lines = text.split("\n")
-        norm = lambda s: re.sub(r"\s+", " ", s.strip()).lower()
+
+        def norm(s: str) -> str:
+            return re.sub(r"\s+", " ", s.strip()).lower()
+
         counts = Counter(norm(ln) for ln in lines if ln.strip())
         repeated = {
             k for k, c in counts.items()
