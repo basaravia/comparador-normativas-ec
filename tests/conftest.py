@@ -8,13 +8,11 @@ También aplica el mismo workaround de OpenMP que ``streamlit_app.py`` y
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
-# Mismo workaround que streamlit_app.py: evita crash nativo en Apple Silicon
-# cuando faiss y el runtime OpenMP de Docling/torch coexisten en el proceso.
-# Debe fijarse antes de que cualquier módulo importe esas librerías.
-os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+# Mismo arranque que la app, antes de que cualquier módulo importe faiss/docling/torch.
+# Una copia del workaround aquí volvería a duplicar lo que bootstrap centraliza.
+import src.bootstrap  # noqa: F401
 
 import pytest
 

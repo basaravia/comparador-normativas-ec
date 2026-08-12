@@ -11,14 +11,13 @@ Ejecutar con:  streamlit run streamlit_app.py
 from __future__ import annotations
 
 import logging
-import os
 import time
 from pathlib import Path
 
-# Apple Silicon 16GB: evita el crash nativo del kernel cuando faiss y el
-# runtime OpenMP de Docling/torch coexisten en el mismo proceso — mismo
-# workaround que master.ipynb, debe fijarse antes de importar esas libs.
-os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+# Prepara el proceso al importarse; debe ir antes que faiss/docling/torch. El workaround
+# concreto vive en src/bootstrap.py y no aquí: cuando el frontend deje de ser Python
+# (Fase 2), este archivo desaparece y con él se iría el arranque del proceso.
+import src.bootstrap  # noqa: F401
 
 import altair as alt
 import pandas as pd
@@ -421,6 +420,10 @@ with tab_compare:
                     progress_callback=_on_progress,
                 )
                 st.session_state["results_df"] = results_df
+                # Una corrida completa borra la marca de la anterior. Sin esto, tras un
+                # aborto la pestaña de resultados sigue avisando "no usar como papel de
+                # trabajo" sobre un papel de trabajo perfectamente válido.
+                st.session_state.pop("run_parcial", None)
 
                 excel_path = comparator.export_excel(results_df, OUTPUT_DIR / "reporte_comparacion.xlsx")
                 st.session_state["excel_bytes"] = excel_path.read_bytes()

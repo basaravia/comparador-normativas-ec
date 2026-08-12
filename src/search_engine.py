@@ -114,10 +114,26 @@ class NormativaIndex:
         from datetime import datetime, timezone
 
         backend = self._backend
+
+        # El nombre del modelo tiene que salir como STRING sí o sí.
+        #
+        # La versión anterior encadenaba `getattr(backend, "_model", None)` como fallback,
+        # y en `SentenceTransformersEmbeddings` ese atributo **es el objeto
+        # SentenceTransformer**, no su nombre: `save()` reventaba con
+        # `TypeError: Object of type SentenceTransformer is not JSON serializable` por el
+        # camino perfectamente alcanzable de elegir backend local y pulsar "Persistir
+        # índice". Con DMR no se notaba porque ahí `_model` sí es un string.
+        for atributo in ("nombre_modelo", "_model_name", "_model"):
+            valor = getattr(backend, atributo, None)
+            if isinstance(valor, str) and valor:
+                modelo = valor
+                break
+        else:
+            modelo = "desconocido"
+
         return {
             "backend": type(backend).__name__,
-            "modelo": getattr(backend, "nombre_modelo", None) or getattr(backend, "_model", None)
-                      or getattr(backend, "_model_name", None) or "desconocido",
+            "modelo": modelo,
             "dim": int(self._index.d) if self._index is not None else None,
             "prefijo_documento": getattr(backend, "prefijo_documento", ""),
             "fecha": datetime.now(timezone.utc).isoformat(timespec="seconds"),

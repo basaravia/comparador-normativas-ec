@@ -177,3 +177,49 @@ class TestElMotorNoConstruyeClientes:
             f"estos módulos construyen su propio cliente de chat: {infractores}. "
             "Deben pedírselo a providers.build_chat_model()"
         )
+
+
+class TestUnVocabularioParaLosPrefijos:
+    """Regresión: el adaptador declaraba los prefijos con otros nombres.
+
+    `EmbeddingBackend` usa `passage_prefix`/`query_prefix` y es lo único que
+    `NormativaIndex` lee. El adaptador de P-a llegó declarando
+    `prefijo_documento`/`prefijo_consulta`: el prefijo se declaraba y no llegaba nunca al
+    modelo — el defecto 3 de §2.2 recreado dentro de la abstracción creada para
+    generalizarlo.
+    """
+
+    def _adaptador(self, vistos):
+        class _Emb:
+            def embed_documents(self, textos):
+                vistos.extend(textos)
+                return [[0.1] * 4 for _ in textos]
+
+        return LangChainEmbeddingsAdapter(
+            _Emb(), prefijo_documento="passage: ", prefijo_consulta="query: ",
+        )
+
+    def test_el_prefijo_declarado_llega_al_modelo(self):
+        vistos: list[str] = []
+        ad = self._adaptador(vistos)
+        ad.encode(["texto uno"], prefix=ad.passage_prefix)
+        assert vistos == ["passage: texto uno"], (
+            "el prefijo se declaró pero no llegó: los nombres del adaptador y los que "
+            "lee el índice no coinciden"
+        )
+
+    def test_ambos_vocabularios_leen_el_mismo_valor(self):
+        ad = self._adaptador([])
+        assert ad.passage_prefix == ad.prefijo_documento
+        assert ad.query_prefix == ad.prefijo_consulta
+
+    def test_es_el_nombre_que_el_indice_consulta(self):
+        """Si el índice cambiara de atributo, esta prueba lo delata."""
+        import inspect
+
+        from src.search_engine import NormativaIndex
+
+        fuente = inspect.getsource(NormativaIndex.build) + inspect.getsource(
+            NormativaIndex.semantic_search
+        )
+        assert "passage_prefix" in fuente and "query_prefix" in fuente

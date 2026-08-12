@@ -72,11 +72,29 @@ class LangChainEmbeddingsAdapter(EmbeddingBackend):
         self._embedder = embeddings
         self._batch_size = batch_size
         self._dim: int | None = None
-        # Los prefijos son del modelo, no del código que lo llama. Declararlos aquí evita
-        # que el índice vuelva a fijarlos a ciegas (defecto 3 de §2.2).
-        self.prefijo_documento = prefijo_documento
-        self.prefijo_consulta = prefijo_consulta
         self.nombre_modelo = nombre_modelo
+
+        # Los prefijos son del modelo, no del código que lo llama.
+        #
+        # `passage_prefix`/`query_prefix` son los nombres de `EmbeddingBackend` y los
+        # únicos que `NormativaIndex` lee. Este adaptador llegó declarando
+        # `prefijo_documento`/`prefijo_consulta`, un segundo vocabulario en el mismo
+        # archivo: el prefijo se declaraba y no llegaba nunca al modelo — el defecto 3
+        # de §2.2 recreado justo dentro de la abstracción creada para generalizarlo.
+        #
+        # Manda el nombre de la clase base. Los alias en español se conservan como
+        # propiedades de solo lectura para no romper a quien ya los use, pero no son
+        # una segunda fuente: ambos leen el mismo atributo.
+        self.passage_prefix = prefijo_documento
+        self.query_prefix = prefijo_consulta
+
+    @property
+    def prefijo_documento(self) -> str:
+        return self.passage_prefix
+
+    @property
+    def prefijo_consulta(self) -> str:
+        return self.query_prefix
 
     def encode(self, texts: Sequence[str], prefix: str = "") -> np.ndarray:
         textos = [f"{prefix}{t}" if prefix else t for t in texts]
@@ -121,6 +139,7 @@ class LangChainDMREmbeddings(EmbeddingBackend):
         from langchain_openai import OpenAIEmbeddings
 
         self._model = model
+        self.nombre_modelo = model
         self._batch_size = batch_size
         self._embedder = OpenAIEmbeddings(
             model=model,
@@ -181,6 +200,10 @@ class SentenceTransformersEmbeddings(EmbeddingBackend):
         _device = self._resolve_device(device)
         self._model = SentenceTransformer(model_name, device=_device)
         self._batch_size = batch_size
+        # El identificador del modelo, como string. `_model` es el objeto cargado, no su
+        # nombre, y `index_meta.json` necesita algo serializable para poder rechazar
+        # después un índice construido con otro modelo.
+        self.nombre_modelo = model_name
 
     def encode(
         self,

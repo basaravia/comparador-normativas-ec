@@ -106,3 +106,46 @@ class TestIndiceSinFirma:
         assert any("no lleva firma" in r.getMessage() for r in caplog.records), (
             "cargar un índice sin firma no puede pasar en silencio"
         )
+
+
+class TestFirmaConBackendsReales:
+    """Regresión: la firma se resolvía sobre atributos que no son strings.
+
+    `_firma_backend()` encadenaba `getattr(backend, "_model")` como fallback, y en el
+    backend local ese atributo **es el objeto SentenceTransformer**, no su nombre. El
+    resultado era `TypeError: ... is not JSON serializable` al pulsar "Persistir índice"
+    con el backend local — camino perfectamente alcanzable desde la UI. Con el backend
+    remoto no se notaba porque ahí `_model` sí es un string.
+
+    Las pruebas de arriba no lo detectaban porque inyectan `nombre_modelo` a mano sobre
+    un doble, así que nunca tocan la resolución real.
+    """
+
+    def test_el_backend_local_produce_una_firma_serializable(self, tmp_path, normativa_df):
+        import json
+        from unittest.mock import patch
+
+        with patch("sentence_transformers.SentenceTransformer"):
+            from src.embeddings import SentenceTransformersEmbeddings
+            backend = SentenceTransformersEmbeddings(device="cpu")
+
+        # No se construye el índice (haría falta el modelo real); se ejercita la firma,
+        # que es donde estaba el fallo.
+        idx = NormativaIndex(embedding_backend=backend, use_reranker=False)
+        firma = idx._firma_backend()
+
+        json.dumps(firma)   # esto es lo que reventaba
+        assert firma["modelo"] == "intfloat/multilingual-e5-large"
+        assert isinstance(firma["modelo"], str)
+
+    def test_el_backend_remoto_tambien(self):
+        import json
+        from unittest.mock import patch
+
+        with patch("langchain_openai.OpenAIEmbeddings"):
+            from src.embeddings import LangChainDMREmbeddings
+            backend = LangChainDMREmbeddings(model="ai/qwen3-embedding:latest")
+
+        firma = NormativaIndex(embedding_backend=backend, use_reranker=False)._firma_backend()
+        json.dumps(firma)
+        assert firma["modelo"] == "ai/qwen3-embedding:latest"
