@@ -36,6 +36,7 @@ from src import (
     SentenceTransformersEmbeddings,
 )
 from src import config as cfg
+from src.errors import RunAbortedError
 
 logger = logging.getLogger("app")
 
@@ -398,6 +399,26 @@ with tab_compare:
                 elapsed = time.time() - t0
                 logger.info("Comparación completa en %.1fs: %d secciones analizadas", elapsed, len(results_df))
                 progress_bar.progress(1.0, text=f"✅ Completado en {elapsed:.1f}s")
+            except RunAbortedError as e:
+                # La corrida se detuvo a propósito: el backend dejó de responder. El
+                # mensaje tiene que ser accionable —qué modelo, qué endpoint, cuánto
+                # quedó sin analizar— porque antes esto se presentaba como un resultado
+                # completo lleno de "no aplica" (ítem 1).
+                logger.error("Comparación abortada: %s", e)
+                st.error(
+                    f"**Corrida detenida.** {e.completadas} de {e.total} secciones "
+                    f"analizadas; **{e.omitidas} quedaron sin procesar**.\n\n"
+                    f"Modelo: `{config['llm_model']}` · Endpoint: `{config['dmr_base_url']}`\n\n"
+                    f"Causa: {e.causa}"
+                )
+                if e.parciales is not None and len(e.parciales):
+                    st.warning(
+                        "Los resultados parciales se conservan abajo, **etiquetados como "
+                        "incompletos**. No constituyen un papel de trabajo: las secciones "
+                        "omitidas no se analizaron, no es que no les aplique norma."
+                    )
+                    st.session_state["results_df"] = e.parciales
+                    st.session_state["run_parcial"] = True
             except Exception as e:
                 logger.error("Comparación interrumpida: %s", e)
                 st.error(f"Error durante la comparación: {e}")
@@ -415,6 +436,28 @@ with tab_results:
         st.info("Ejecuta una comparación en la pestaña **3. Comparación** para ver resultados.")
     else:
         results_df = st.session_state["results_df"]
+
+        if st.session_state.get("run_parcial"):
+            st.error(
+                "⚠️ **Resultados parciales de una corrida interrumpida.** No usar como "
+                "papel de trabajo: las secciones sin analizar aparecen abajo como "
+                "*omitido*, que no es un veredicto de cumplimiento."
+            )
+
+        # Filas sin veredicto por fallo técnico. Se cuentan aparte y se muestran: si se
+        # filtraran por nivel_cumplimiento (que ahora es None) desaparecerían de la tabla
+        # sin que nadie lo notara — el mismo fallo silencioso que corrige el ítem 1.
+        if "estado_analisis" in results_df.columns:
+            sin_analizar = results_df[results_df["estado_analisis"] != "ok"]
+            if len(sin_analizar):
+                st.warning(
+                    f"**{len(sin_analizar)} de {len(results_df)} secciones sin análisis "
+                    f"utilizable** — "
+                    + " · ".join(
+                        f"{n}: {c}"
+                        for n, c in sin_analizar["estado_analisis"].value_counts().items()
+                    )
+                )
 
         counts = results_df["nivel_cumplimiento"].value_counts()
         m1, m2, m3, m4 = st.columns(4)
