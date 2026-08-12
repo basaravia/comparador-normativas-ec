@@ -258,3 +258,44 @@ def test_export_excel_usa_los_tokens_para_header_y_niveles(tmp_path):
     fila_omision = ws[3]  # segunda fila de datos → nivel "omision"
     assert fila_cumple[0].fill.start_color.rgb[-6:].upper() == tokens.hex_sin_almohadilla(tokens.tinte("cumple"))
     assert fila_omision[0].fill.start_color.rgb[-6:].upper() == tokens.hex_sin_almohadilla(tokens.tinte("omision"))
+
+
+class TestMarcaDeGrafica:
+    """Regresión: las marcas de gráfica necesitan saturación, no tinte.
+
+    El primer cableado usó el tinte también para `fg`, así que las barras de la
+    gráfica de resultados quedaban a ~1.2:1 sobre blanco: técnicamente presentes,
+    visualmente inexistentes. WCAG pide ≥3:1 para componentes no textuales, y una
+    barra de gráfica lo es.
+    """
+
+    def test_cada_nivel_tiene_marca_visible_sobre_blanco(self):
+        minimo = tokens.CONTRASTE_MINIMO["componente_ui"]
+        for nivel in tokens.NIVEL_ORDEN:
+            ratio = tokens.ratio_contraste(tokens.marca(nivel), "#ffffff")
+            assert ratio >= minimo, (
+                f"la marca de '{nivel}' ({tokens.marca(nivel)}) da {ratio:.2f}:1 sobre "
+                f"blanco, por debajo del mínimo {minimo}:1 para componentes no textuales"
+            )
+
+    def test_la_marca_no_es_el_tinte(self):
+        for nivel in tokens.NIVEL_ORDEN:
+            assert tokens.marca(nivel).lower() != tokens.tinte(nivel).lower(), (
+                f"'{nivel}' usa el mismo color para trazo y relleno; el trazo será invisible"
+            )
+
+    def test_la_marca_respeta_la_regla_cromo_dato(self):
+        prohibidos = {tokens.PRIMARIO.lower(), tokens.ACENTO.lower()}
+        for nivel in tokens.NIVEL_ORDEN:
+            assert tokens.marca(nivel).lower() not in prohibidos, (
+                f"la marca de '{nivel}' usa un color de cromo: el dato se confundiría "
+                "con la interfaz"
+            )
+
+    def test_el_tema_expone_trazo_y_relleno_distintos(self):
+        from app.theme import NIVEL_COLORS
+
+        for nivel, colores in NIVEL_COLORS.items():
+            assert colores["fg"] != colores["bg"], (
+                f"NIVEL_COLORS['{nivel}'] usa el mismo color para fg y bg"
+            )

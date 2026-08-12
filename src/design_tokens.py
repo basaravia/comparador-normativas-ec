@@ -139,6 +139,22 @@ def tinte(nivel: str) -> str:
     return ESTADO[nivel]["tinte"]
 
 
+def marca(nivel: str) -> str:
+    """Color de TRAZO saturado del nivel — para marcas de gráfica.
+
+    Distinto de ``tinte()`` y por un motivo medible, no estético: un tinte queda a
+    ~1.2:1 sobre blanco, así que una barra pintada con él es invisible. WCAG exige
+    ≥3:1 para componentes no textuales, y una barra de gráfica lo es.
+
+    Reparto de responsabilidades:
+      · ``tinte(nivel)``  → relleno de fondo con texto oscuro encima (tablas, Excel)
+      · ``marca(nivel)``  → trazo o relleno de marca gráfica sobre fondo claro
+
+    Tampoco puede ser ``PRIMARIO`` ni ``ACENTO``: sigue rigiendo la regla cromo/dato.
+    """
+    return ESTADO[nivel]["marca"]
+
+
 def etiqueta(nivel: str) -> str:
     """Etiqueta textual del nivel — obligatoria junto al color (§8.2: el color
     nunca va solo, por daltonismo)."""

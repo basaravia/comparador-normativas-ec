@@ -6,13 +6,11 @@
     "Los ratios documentados son contra #FFFFFF salvo indicación, medidos con WCAG 2.1.",
     "Ver PLAN_MEJORAS_ANEXO.md §8 para la regla cromo/dato y los mínimos exigidos."
   ],
-
   "meta": {
     "nombre": "Placeholder genérico",
     "version": "1.0",
     "fuente": "valores neutros; sin relación con ninguna identidad corporativa"
   },
-
   "tipografia": {
     "familia": "Inter, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
     "_nota_familia": "Empaquetar localmente. NO servir desde un CDN externo (§8.1).",
@@ -26,30 +24,50 @@
     },
     "_nota_escala": "El salto h1→h2 es grande a propósito; es un rasgo del sistema, no un descuido."
   },
-
   "forma": {
     "radio_base": "2px",
     "radio_alterno": "4px",
     "radio_circular": "50%",
     "_nota": "Esquinas casi rectas. NO usar rounded-lg ni sombras suaves: no se parecería (§8.1)."
   },
-
   "cromo": {
     "_doc": "Solo interfaz: cabecera, navegación, botón primario, estado activo. NUNCA para datos.",
-    "primario":       { "hex": "#2C5282", "ratio_sobre_blanco": 7.97, "uso": "texto normal, titulares, fondo de botón con texto blanco" },
-    "primario_hover": { "hex": "#2A4365", "ratio_sobre_blanco": 10.05, "uso": "relleno de área" },
-    "acento":         { "hex": "#63B3ED", "ratio_sobre_blanco": 2.28, "uso": "SOLO bordes y estados sin texto — falla AA para cualquier texto" },
-    "secundario":     { "hex": "#319795", "ratio_sobre_blanco": 3.51, "uso": "relleno, borde, icono, texto grande — NO texto normal" }
+    "primario": {
+      "hex": "#2C5282",
+      "ratio_sobre_blanco": 7.97,
+      "uso": "texto normal, titulares, fondo de botón con texto blanco"
+    },
+    "primario_hover": {
+      "hex": "#2A4365",
+      "ratio_sobre_blanco": 10.05,
+      "uso": "relleno de área"
+    },
+    "acento": {
+      "hex": "#63B3ED",
+      "ratio_sobre_blanco": 2.28,
+      "uso": "SOLO bordes y estados sin texto — falla AA para cualquier texto"
+    },
+    "secundario": {
+      "hex": "#319795",
+      "ratio_sobre_blanco": 3.51,
+      "uso": "relleno, borde, icono, texto grande — NO texto normal"
+    }
   },
-
   "neutros": {
-    "fondo":     "#F7FAFC",
+    "fondo": "#F7FAFC",
     "superficie": "#FFFFFF",
-    "divisor":   "#E2E8F0",
-    "muted":     { "hex": "#4A5568", "ratio_sobre_blanco": 7.53, "uso": "texto secundario" },
-    "texto":     { "hex": "#2D3748", "ratio_sobre_blanco": 11.99, "uso": "texto principal y sobre tintes de estado" }
+    "divisor": "#E2E8F0",
+    "muted": {
+      "hex": "#4A5568",
+      "ratio_sobre_blanco": 7.53,
+      "uso": "texto secundario"
+    },
+    "texto": {
+      "hex": "#2D3748",
+      "ratio_sobre_blanco": 11.99,
+      "uso": "texto principal y sobre tintes de estado"
+    }
   },
-
   "estado": {
     "_doc": [
       "Datos, no cromo. Tinte desaturado + texto oscuro + icono + etiqueta (§8.2).",
@@ -57,22 +75,55 @@
       "El icono y la etiqueta son obligatorios: el color nunca va solo (daltonismo).",
       "Los ratios son de neutros.texto.hex sobre el tinte."
     ],
-    "cumple":    { "tinte": "#DDF0EE", "ratio_texto": 10.15, "icono": "check",    "etiqueta": "Cumple" },
-    "parcial":   { "tinte": "#FFF2CC", "ratio_texto": 10.75, "icono": "alert",    "etiqueta": "Parcial" },
-    "omision":   { "tinte": "#FCE4D6", "ratio_texto": 9.82,  "icono": "x",        "etiqueta": "Omisión" },
-    "no_aplica": { "tinte": "#F2F2F2", "ratio_texto": 10.71, "icono": "minus",    "etiqueta": "No aplica" },
-    "_nota_cumple": "Se usa un tinte verde-azulado, no verde puro: si la marca real es verde, un 'cumple' verde se confunde con el cromo (§8.2)."
+    "cumple": {
+      "tinte": "#DDF0EE",
+      "ratio_texto": 10.15,
+      "icono": "check",
+      "etiqueta": "Cumple",
+      "marca": "#0F766E",
+      "ratio_marca": 5.47
+    },
+    "parcial": {
+      "tinte": "#FFF2CC",
+      "ratio_texto": 10.75,
+      "icono": "alert",
+      "etiqueta": "Parcial",
+      "marca": "#B45309",
+      "ratio_marca": 5.02
+    },
+    "omision": {
+      "tinte": "#FCE4D6",
+      "ratio_texto": 9.82,
+      "icono": "x",
+      "etiqueta": "Omisión",
+      "marca": "#B91C1C",
+      "ratio_marca": 6.47
+    },
+    "no_aplica": {
+      "tinte": "#F2F2F2",
+      "ratio_texto": 10.71,
+      "icono": "minus",
+      "etiqueta": "No aplica",
+      "marca": "#6B7280",
+      "ratio_marca": 4.83
+    },
+    "_nota_cumple": "Se usa un tinte verde-azulado, no verde puro: si la marca real es verde, un 'cumple' verde se confunde con el cromo (§8.2).",
+    "_nota_marca": [
+      "'tinte' es relleno de fondo con texto oscuro encima (tablas, celdas de Excel).",
+      "'marca' es el color del trazo saturado para graficas: una barra pintada con el",
+      "tinte queda a ~1.2:1 sobre blanco, es decir, invisible. WCAG pide >=3:1 para",
+      "componentes no textuales, y una barra de grafica lo es.",
+      "Ninguna 'marca' puede ser el verde institucional ni el acento (regla cromo/dato)."
+    ]
   },
-
   "logos": {
     "_doc": "Rutas relativas al repo. Resueltas por .env; sin archivo real se cae a este directorio.",
-    "banner":     "assets/brand/_placeholder/logo_org_banner_240x64.svg",
-    "mark":       "assets/brand/_placeholder/logo_org_mark_64x64.svg",
-    "membrete":   "assets/brand/_placeholder/logo_org_horizontal_320x80.svg",
-    "mono":       "assets/brand/_placeholder/logo_org_mono_240x64.svg",
-    "favicon":    "assets/brand/_placeholder/logo_org_favicon_32x32.png"
+    "banner": "assets/brand/_placeholder/logo_org_banner_240x64.svg",
+    "mark": "assets/brand/_placeholder/logo_org_mark_64x64.svg",
+    "membrete": "assets/brand/_placeholder/logo_org_horizontal_320x80.svg",
+    "mono": "assets/brand/_placeholder/logo_org_mono_240x64.svg",
+    "favicon": "assets/brand/_placeholder/logo_org_favicon_32x32.png"
   },
-
   "contraste_minimo": {
     "_doc": "Verificado por tests/test_design_tokens.py. Si un token baja de su mínimo, falla la suite.",
     "texto_normal": 4.5,

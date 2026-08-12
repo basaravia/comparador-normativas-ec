@@ -36,8 +36,12 @@ from src import design_tokens as tokens
 # tono por nivel es el tinte, y la distinción entre niveles la llevan además
 # el ícono y la etiqueta (`tokens.icono` / `tokens.etiqueta`), nunca el color
 # en solitario (daltonismo, ~8 % de los hombres).
+# `fg` es el trazo saturado y `bg` el relleno desaturado. No son el mismo color y no
+# pueden serlo: `fg` alimenta las barras de la gráfica de resultados, y con el tinte
+# quedaban a ~1.2:1 sobre blanco — invisibles. `bg` pinta el fondo de las filas de la
+# tabla, donde lo que necesita contraste es el texto oscuro que va encima.
 NIVEL_COLORS = {
-    nivel: {"fg": tokens.tinte(nivel), "bg": tokens.tinte(nivel)}
+    nivel: {"fg": tokens.marca(nivel), "bg": tokens.tinte(nivel)}
     for nivel in tokens.NIVEL_ORDEN
 }
 
