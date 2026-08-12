@@ -31,7 +31,12 @@ from .config import (
     LLM_MAX_TOKENS,
     LLM_TEMPERATURE,
 )
-from .errors import AnalysisParseError, LLMUnavailableError, classify_llm_exception
+from .errors import (
+    AnalysisParseError,
+    GradingParseError,
+    LLMUnavailableError,
+    classify_llm_exception,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -276,41 +281,124 @@ class LLMGrader:
             return []
 
         candidates_text = self._format_candidates(candidates)
-        try:
-            result: GradingResult = self._grading_chain.invoke({
-                "manual_text": manual_text[:1500],
-                "candidates_text": candidates_text,
-            })
-        except Exception as e:
-            error = classify_llm_exception(e, modelo=self._model_id, url=self._base_url)
-            if isinstance(error, LLMUnavailableError):
-                # El backend no va a responder mejor en la fila siguiente: se relanza
-                # para que run() cancele lo pendiente en vez de seguir produciendo
-                # veredictos sobre secciones que el modelo nunca leyó (ítem 1).
-                logger.error("Grading abortado por fallo de infraestructura: %s", error)
-                raise error from e
+        entrada = {"manual_text": manual_text[:1500], "candidates_text": candidates_text}
 
-            # Fallo de contenido: degrada solo esta fila.
+        try:
+            result: GradingResult = self._graduar_con_reintentos(entrada)
+        except LLMUnavailableError as e:
+            # El backend no va a responder mejor en la fila siguiente: se relanza para
+            # que run() cancele lo pendiente en vez de seguir produciendo veredictos
+            # sobre secciones que el modelo nunca leyó (ítem 1).
+            logger.error("Grading abortado por fallo de infraestructura: %s", e)
+            raise
+        except GradingParseError as e:
+            # Agotados los reintentos, el grading es **indeterminado**, no positivo.
             #
-            # NOTA — el default `relevante=True` sigue aquí a propósito: cambiarlo a
-            # None es alcance del ítem 4, que además añade los reintentos de
-            # reparación del JSON antes de darse por vencido. Tocarlo aquí rompería
-            # `_process_row`, que filtra con `.get("relevante", True)`.
-            logger.warning("Grading no parseable (%s). Se asumen todos relevantes.", error)
-            return [{**c, "relevante": True, "score_grade": 0.5, "razon_grade": ""} for c in candidates]
+            # Antes se devolvía `relevante=True` para todos: un parseo roto colaba
+            # falsos positivos de cumplimiento en el papel de trabajo, en silencio y
+            # sin dejar rastro. Es el riesgo espejo del ítem 1 y el peor de los dos:
+            # allí se perdían secciones de forma ruidosa, aquí se afirmaba haber
+            # verificado algo que nadie verificó.
+            logger.error("Grading no parseable tras reintentos: %s", e)
+            return [
+                {
+                    **c,
+                    "relevante": None,
+                    "score_grade": None,
+                    "razon_grade": "",
+                    "requiere_revision": True,
+                    "motivo_revision": "grading_no_parseable",
+                }
+                for c in candidates
+            ]
 
         grade_map = {g.element_id: g for g in result.candidatos}
         enriched = []
         for c in candidates:
             eid = c.get("element_id", c.get("chunk_id", ""))
             grade = grade_map.get(eid)
+
+            if grade is None:
+                # El modelo parseó bien pero se dejó este candidato fuera de la
+                # respuesta. Antes se asumía relevante: mismo falso positivo que el
+                # parseo roto, solo que más difícil de ver porque el resto de la
+                # respuesta era válida. Ausencia de juicio no es juicio favorable.
+                enriched.append({
+                    **c,
+                    "relevante": None,
+                    "score_grade": None,
+                    "razon_grade": "",
+                    "requiere_revision": True,
+                    "motivo_revision": "candidato_ausente_del_grading",
+                })
+                continue
+
             enriched.append({
                 **c,
-                "relevante": grade.relevante if grade else True,
-                "score_grade": grade.score if grade else 0.5,
-                "razon_grade": grade.razon if grade else "",
+                "relevante": grade.relevante,
+                "score_grade": grade.score,
+                "razon_grade": grade.razon,
+                "requiere_revision": False,
             })
         return enriched
+
+    # ── Robustez del grading, en tres niveles ─────────────────────────────
+
+    def _graduar_con_reintentos(self, entrada: dict) -> GradingResult:
+        """Intenta el grading con degradación progresiva antes de rendirse.
+
+        Los modelos pequeños fallan produciendo JSON de formas distintas, y cada nivel
+        ataca una: el primero repara la salida, el segundo reduce lo que hay que seguir.
+        Solo cuando ninguno funciona se declara indeterminado — que es caro para el
+        auditor, porque manda la fila a revisión manual.
+        """
+        # Nivel 1 — la cadena normal.
+        try:
+            return self._grading_chain.invoke(entrada)
+        except Exception as e:
+            error = classify_llm_exception(e, modelo=self._model_id, url=self._base_url)
+            if isinstance(error, LLMUnavailableError):
+                raise error from e
+            logger.debug("Grading nivel 1 falló (%s); se intenta reparar la salida", error)
+
+        # Nivel 2 — OutputFixingParser: le pide al propio modelo que arregle su JSON.
+        try:
+            from langchain.output_parsers import OutputFixingParser
+
+            reparador = OutputFixingParser.from_llm(
+                parser=PydanticOutputParser(pydantic_object=GradingResult),
+                llm=self._llm_grader,
+            )
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", _SYS_GRADER), ("human", _GRADER_USER),
+            ]).partial(format_instructions=reparador.get_format_instructions())
+            return (prompt | self._llm_grader | reparador).invoke(entrada)
+        except Exception as e:
+            error = classify_llm_exception(e, modelo=self._model_id, url=self._base_url)
+            if isinstance(error, LLMUnavailableError):
+                raise error from e
+            logger.debug("Grading nivel 2 falló (%s); se intenta prompt simplificado", error)
+
+        # Nivel 3 — prompt mínimo. Las `format_instructions` de Pydantic son largas y a
+        # un modelo pequeño le consumen la ventana antes de llegar a responder.
+        try:
+            simple = ChatPromptTemplate.from_messages([
+                ("system", _SYS_GRADER),
+                ("human",
+                 "Sección del manual:\n{manual_text}\n\n"
+                 "Candidatos:\n{candidates_text}\n\n"
+                 'Responde SOLO este JSON: {{"candidatos": [{{"element_id": "...", '
+                 '"relevante": true, "score": 0.9, "razon": "..."}}]}}'),
+            ])
+            parser = PydanticOutputParser(pydantic_object=GradingResult)
+            return (simple | self._llm_grader | parser).invoke(entrada)
+        except Exception as e:
+            error = classify_llm_exception(e, modelo=self._model_id, url=self._base_url)
+            if isinstance(error, LLMUnavailableError):
+                raise error from e
+            raise GradingParseError(
+                f"El grading no encaja en el esquema tras tres intentos: {error}", causa=e,
+            ) from e
 
     def analyze_comparison(
         self,

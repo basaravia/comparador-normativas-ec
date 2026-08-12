@@ -37,6 +37,8 @@ from src import (
 )
 from src import config as cfg
 from src.errors import RunAbortedError
+from src.model_registry import modelos_disponibles, preflight
+from src.providers import Provider, ProviderSpec
 
 logger = logging.getLogger("app")
 
@@ -59,14 +61,22 @@ render_header(
 # ──────────────────────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=15, show_spinner=False)
-def _check_dmr(base_url: str) -> bool:
-    import httpx
+def _modelos_del_backend(base_url: str) -> list[str]:
+    """Modelos que el backend ofrece de verdad.
 
-    try:
-        r = httpx.get(f"{base_url}/models", timeout=1.5)
-        return r.status_code == 200
-    except Exception:
-        return False
+    Antes esto solo comprobaba `status_code == 200` y los desplegables se poblaban con
+    constantes escritas a mano: ofrecían modelos que quizá no estaban y ocultaban los
+    que sí. Un modelo mal escrito se descubría a mitad de una corrida de horas.
+    """
+    spec = ProviderSpec(proveedor=Provider.DMR, base_url=base_url)
+    return modelos_disponibles(spec, usar_cache=False)
+
+
+def _opciones_modelo(disponibles: list[str], defecto: str) -> list[str]:
+    """Lista real del backend; si no responde, las constantes como último recurso."""
+    if disponibles:
+        return disponibles + ["Personalizado…"]
+    return [defecto, cfg.DMR_LLM_FALLBACK, "Personalizado…"]
 
 
 def _sidebar_config() -> dict:
@@ -80,8 +90,12 @@ def _sidebar_config() -> dict:
 
     st.sidebar.markdown("#### Conexión")
     dmr_base_url = st.sidebar.text_input("DMR base URL", value=cfg.DMR_BASE_URL, key="cfg_dmr_url")
-    dmr_ok = _check_dmr(dmr_base_url)
-    st.sidebar.caption("🟢 DMR conectado" if dmr_ok else "🔴 DMR no responde (verifica Docker Model Runner)")
+    modelos_backend = _modelos_del_backend(dmr_base_url)
+    dmr_ok = bool(modelos_backend)
+    st.sidebar.caption(
+        f"🟢 Backend conectado · {len(modelos_backend)} modelos disponibles"
+        if dmr_ok else "🔴 El backend no responde en esa URL"
+    )
 
     st.sidebar.markdown("#### Embeddings")
     embed_backend_kind = st.sidebar.radio(
@@ -91,7 +105,7 @@ def _sidebar_config() -> dict:
     )
     embed_model = st.sidebar.selectbox(
         "Modelo de embedding",
-        options=["ai/granite-embedding-multilingual:latest", "ai/qwen3-embedding:latest", "Personalizado…"],
+        options=_opciones_modelo(modelos_backend, cfg.DMR_EMBED_MODEL),
         index=0,
         key="cfg_embed_model_select",
         disabled=embed_backend_kind != "Docker Model Runner",
@@ -107,7 +121,7 @@ def _sidebar_config() -> dict:
     st.sidebar.markdown("#### LLM (grading + análisis)")
     llm_model = st.sidebar.selectbox(
         "Modelo LLM",
-        options=[cfg.DMR_LLM_MODEL, cfg.DMR_LLM_FALLBACK, "Personalizado…"],
+        options=_opciones_modelo(modelos_backend, cfg.DMR_LLM_MODEL),
         index=0,
         key="cfg_llm_model_select",
     )
@@ -346,7 +360,25 @@ with tab_compare:
                 "puede tomar varias horas."
             )
 
-        run_clicked = st.button("🚀 Ejecutar comparación", type="primary")
+        # Preflight: valida modelo LLM y de embeddings CONTRA LA LISTA REAL antes de
+        # dejar arrancar. Sin esto, un modelo mal escrito se descubría a mitad de una
+        # corrida de horas — y con el ítem 1 ya no produce filas falsas, pero sigue
+        # costando el tiempo (ítem 4).
+        _spec = ProviderSpec(proveedor=Provider.DMR, base_url=config["dmr_base_url"])
+        chequeo = preflight(
+            _spec, config["llm_model"],
+            _spec if config["embed_backend_kind"] == "Docker Model Runner" else None,
+            config["embed_model"] if config["embed_backend_kind"] == "Docker Model Runner" else None,
+        )
+        if not chequeo.ok:
+            st.error(
+                "**No se puede ejecutar con esta configuración.**\n\n"
+                + "\n\n".join(f"- {m}" for m in chequeo.mensajes)
+            )
+
+        run_clicked = st.button(
+            "🚀 Ejecutar comparación", type="primary", disabled=not chequeo.ok
+        )
         progress_bar = st.progress(0.0, text="En espera…")
         log_box = st.empty()
 
