@@ -324,7 +324,17 @@ class DocumentComparator:
             "candidatos_indeterminados": len(indeterminados),
             "requiere_revision": bool(indeterminados),
             # Búsqueda
-            "articulos_lexicos":         [m.get("numero") for m in lexical],
+            "articulos_lexicos": [
+                m.get("numero") for m in lexical if m.get("match_type") != "ambiguo"
+            ],
+            # La ambigüedad viaja a la fila en vez de perderse aquí: la necesitan el
+            # modelo N:N (ítem 5), la cobertura de la Vía 2 (ítem 6) y el flag de
+            # revisión manual (ítem 10).
+            "articulos_lexicos_ambiguos": [
+                {"numero": m.get("numero"), "doc_id": m.get("doc_id"),
+                 "razon": m.get("razon_match", "")}
+                for m in lexical if m.get("match_type") == "ambiguo"
+            ],
             "articulos_semanticos_raw":  [
                 {"numero": c.get("numero"), "sim": c.get("similarity", 0)}
                 for c in semantic_raw

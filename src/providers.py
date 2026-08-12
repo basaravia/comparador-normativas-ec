@@ -96,7 +96,22 @@ class ProviderSpec:
     max_tokens: int = LLM_MAX_TOKENS
     batch_size: int = EMBED_BATCH_SIZE
     device: str = "auto"
+    # Sobrescriben lo que declaran las capacidades del proveedor. §7 pedía que los
+    # timeouts dejaran de estar escritos a mano en el grader, y las capacidades solos no
+    # bastan: son constantes por proveedor, y el grading y el análisis tienen
+    # presupuestos distintos (2 min frente a 3) porque generan volúmenes distintos.
+    timeout_s: int | None = None
+    max_retries: int | None = None
     extra: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def timeout_efectivo(self) -> int:
+        return self.timeout_s if self.timeout_s is not None else self.capacidades.timeout_s
+
+    @property
+    def reintentos_efectivos(self) -> int:
+        return (self.max_retries if self.max_retries is not None
+                else self.capacidades.max_retries)
 
     @property
     def capacidades(self) -> ProviderCapabilities:
@@ -113,6 +128,8 @@ class ProviderSpec:
                 max_tokens=self.max_tokens,
                 batch_size=self.batch_size,
                 device=self.device,
+                timeout_s=self.timeout_s,
+                max_retries=self.max_retries,
                 extra=self.extra,
             )
         return self
@@ -152,11 +169,34 @@ def build_chat_model(spec: ProviderSpec) -> Any:
             api_key="ignored",          # el backend local no autentica
             temperature=spec.temperature,
             max_tokens=spec.max_tokens,
-            timeout=spec.capacidades.timeout_s,
-            max_retries=spec.capacidades.max_retries,
+            timeout=spec.timeout_efectivo,
+            max_retries=spec.reintentos_efectivos,
         )
 
     raise ProviderConfigError(f"Proveedor de chat no soportado: {spec.proveedor.value}")
+
+
+def construir_embeddings_openai(*, model: str, base_url: str, api_key: str = "ignored") -> Any:
+    """Cliente de embeddings compatible con la API de OpenAI.
+
+    Existe para que `embeddings.py` no lo instancie por su cuenta: la construcción de
+    clientes vive aquí y solo aquí, que es lo que hará barato añadir Azure en la Fase 3.
+    """
+    from langchain_openai import OpenAIEmbeddings
+
+    return OpenAIEmbeddings(
+        model=model,
+        base_url=base_url,
+        api_key=api_key,
+        check_embedding_ctx_length=False,
+    )
+
+
+def construir_sentence_transformer(*, model_name: str, device: str) -> Any:
+    """Modelo local de sentence-transformers. Import perezoso: arrastra torch."""
+    from sentence_transformers import SentenceTransformer
+
+    return SentenceTransformer(model_name, device=device)
 
 
 def build_embedding_backend(spec: ProviderSpec) -> Any:
