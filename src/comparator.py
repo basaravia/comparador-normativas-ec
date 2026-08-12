@@ -23,6 +23,7 @@ from typing import Callable, Optional
 import pandas as pd
 from tqdm import tqdm
 
+from .design_tokens import ESTADO, PRIMARIO, SUPERFICIE, hex_sin_almohadilla
 from .llm_grader import ComparisonResult, LLMGrader
 from .search_engine import NormativaIndex
 from .config import FAISS_TOP_K, MAX_WORKERS, RERANKER_TOP_N
@@ -125,20 +126,28 @@ class DocumentComparator:
             df_export.to_excel(writer, index=False, sheet_name="Comparación")
             ws = writer.sheets["Comparación"]
 
-            # Encabezados: fondo azul oscuro, texto blanco bold
-            header_fill = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
-            header_font = Font(color="FFFFFF", bold=True, size=11)
+            # Encabezados: cromo de marca (§8.2 PLAN_MEJORAS_ANEXO.md — cabecera
+            # = primario saturado), texto en superficie (blanco) bold.
+            primario_hex = hex_sin_almohadilla(PRIMARIO)
+            header_fill = PatternFill(start_color=primario_hex, end_color=primario_hex, fill_type="solid")
+            header_font = Font(color=hex_sin_almohadilla(SUPERFICIE), bold=True, size=11)
             for cell in ws[1]:
                 cell.fill = header_fill
                 cell.font = header_font
                 cell.alignment = Alignment(wrap_text=True, horizontal="center", vertical="center")
 
-            # Filas: color según nivel de cumplimiento
+            # Filas: color según nivel de cumplimiento. Tintes desaturados de
+            # `design_tokens.ESTADO` — nunca el primario ni el acento de marca
+            # (regla cromo/dato, §8.2): un "cumple" en verde saturado se
+            # confundiría con el cromo de la cabecera de arriba.
             fills = {
-                "cumple":    PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid"),
-                "parcial":   PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid"),
-                "omision":   PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid"),
-                "no_aplica": PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid"),
+                nivel: PatternFill(
+                    start_color=hex_sin_almohadilla(datos["tinte"]),
+                    end_color=hex_sin_almohadilla(datos["tinte"]),
+                    fill_type="solid",
+                )
+                for nivel, datos in ESTADO.items()
+                if not nivel.startswith("_")
             }
             cumpl_col = next(
                 (j for j, c in enumerate(ws[1], 1) if c.value == "nivel_cumplimiento"),
