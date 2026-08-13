@@ -304,7 +304,7 @@ lo que evita reescribir en la 2 y la 3.
 
 | # | Punto | Decisión |
 |---|-------|----------|
-| S1 | **Punto pendiente 1 del informe** (¿un selector o dos?) | **SUPUESTO, no confirmado. Dos selectores**, uno por vía: alcance normativo (artículos) y alcance del manual (secciones). La doble vía lo vuelve necesario: la Vía 2 se define sobre artículos y la Vía 1 sobre secciones. "Número de secciones a analizar" se conserva como preset "Muestra rápida". La lógica va en `src/scope.py`, independiente de la UI: si el negocio confirma otra cosa, solo cambian los widgets. **Confirmar antes de cerrar el ítem 7.** |
+| S1 | **Punto pendiente 1 del informe** (¿un selector o dos?) | **CONFIRMADO por el negocio el 2026-08-12: dos selectores**, uno por vía: alcance normativo (artículos) y alcance del manual (secciones). La doble vía lo vuelve necesario: la Vía 2 se define sobre artículos y la Vía 1 sobre secciones. "Número de secciones a analizar" se conserva como preset "Muestra rápida". La lógica va en `src/scope.py`, independiente de la UI: si el negocio confirma otra cosa, solo cambian los widgets. Deja de ser supuesto: el ítem 7 puede cerrarse sin reservas. |
 | S2 | Estado de fila fallida | Se introduce `estado_analisis` (`ok`/`error_modelo`/`error_parseo`/`omitido`) **separado** de `nivel_cumplimiento`. Un fallo técnico nunca vuelve a expresarse como `no_aplica`. |
 | S3 | Costo de la Vía 2 | Las aristas N:N se comparten entre vías y el grading se cachea por par `(articulo, seccion)`. La Vía 2 solo gasta LLM en el veredicto por artículo y en la búsqueda inversa de artículos sin aristas. Sin esto, el costo se duplicaría. |
 | S4 | Alcance | Ítems 1–10 + P-a + T + R en Fase 1. Los ítems 11–18 del anexo quedan fuera; se anotan como *follow-up* en §15. |
@@ -1280,8 +1280,9 @@ bloqueado por el punto pendiente 3).
 
 ### Con el negocio
 
-1. **¿Un selector o dos?** — se avanza con el supuesto S1 (dos). **Confirmar antes de cerrar el
-   ítem 7.** Es lo único del anexo que sigue sin decidir y que afecta a la Fase 1.
+1. ~~**¿Un selector o dos?**~~ — **RESUELTO el 2026-08-12: dos selectores**, uno por vía
+   (alcance normativo por artículos, alcance del manual por secciones). Era lo único del
+   anexo sin decidir que afectaba a la Fase 1.
 2. **Nota incompleta "Analizar las…"** del documento original — sin alcance determinable.
 3. **Casos del módulo de comparación entre versiones** (Bloque E) — bloquea el ítem 17.
 4. **Disponibilidad de `document_test/`** — condiciona la validación de cierre de la Fase 1.
