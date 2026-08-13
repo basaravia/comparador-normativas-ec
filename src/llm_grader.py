@@ -57,6 +57,35 @@ class GradingResult(BaseModel):
     candidatos: list[CandidateGrade]
 
 
+class AdopcionResult(BaseModel):
+    """Veredicto por ARTÍCULO — la Vía 2 del ítem 6.
+
+    Paralelo a `ComparisonResult`, que sigue siendo el de la Vía 1. Son esquemas distintos
+    a propósito: la unidad de resultado no es la misma, y forzarlos en uno solo dejaría la
+    mitad de los campos vacíos según qué vía lo produjo — que es como se acaba sin saber
+    qué significa un campo en blanco.
+    """
+
+    nivel_adopcion: Literal["cubierto", "parcial", "no_cubierto", "no_aplica"] = Field(
+        description=(
+            "cubierto: el manual implementa la obligación | parcial: la aborda de forma "
+            "incompleta | no_cubierto: ninguna sección la trata | no_aplica: el artículo "
+            "no impone obligación a esta entidad"
+        )
+    )
+    analisis_adopcion: str = Field(
+        description="Por qué se concluye ese nivel, citando las secciones del manual"
+    )
+    brechas: list[str] = Field(
+        default_factory=list,
+        description="Qué exige el artículo y el manual no cubre",
+    )
+    secciones_relevantes: list[str] = Field(
+        default_factory=list,
+        description="Jerarquías de las secciones que sí lo abordan",
+    )
+
+
 class ComparisonResult(BaseModel):
     """Análisis comparativo completo de una sección del manual vs la normativa."""
 
@@ -133,6 +162,28 @@ Evalúa la relevancia de los candidatos normativos para la sección del manual.
 
 Un candidato es RELEVANTE si regula el mismo proceso, control o actividad que describe el manual.
 Es IRRELEVANTE si coincidió por palabras genéricas pero trata un tema diferente.
+
+{format_instructions}"""
+
+_ADOPCION_USER = """\
+Determina si el manual interno cubre la obligación de este artículo normativo.
+
+=== ARTÍCULO DE LA NORMATIVA ===
+{norma} · Artículo {numero}
+{encabezado}
+{contenido}
+
+=== SECCIONES DEL MANUAL QUE PODRÍAN CUBRIRLO ===
+{secciones}
+
+=== CRITERIO ===
+- cubierto     : alguna sección implementa la obligación de forma suficiente
+- parcial      : la aborda pero deja fuera aspectos que el artículo exige
+- no_cubierto  : ninguna sección la trata
+- no_aplica    : el artículo no impone obligación a una entidad como esta
+
+Si ninguna sección lo cubre, dilo explícitamente en vez de forzar una correspondencia
+débil: un falso "cubierto" es peor que una brecha declarada.
 
 {format_instructions}"""
 
@@ -267,6 +318,13 @@ class LLMGrader:
             ("human", _ANALYST_USER),
         ]).partial(format_instructions=analyst_parser.get_format_instructions())
         self._analysis_chain = analyst_prompt | self._llm_analyst | analyst_parser
+
+        adopcion_parser = PydanticOutputParser(pydantic_object=AdopcionResult)
+        adopcion_prompt = ChatPromptTemplate.from_messages([
+            ("system", _SYS_ANALYST),
+            ("human", _ADOPCION_USER),
+        ]).partial(format_instructions=adopcion_parser.get_format_instructions())
+        self._adopcion_chain = adopcion_prompt | self._llm_analyst | adopcion_parser
 
     # ── API pública ───────────────────────────────────────────────────────
 
@@ -480,6 +538,54 @@ class LLMGrader:
             logger.error("Análisis no parseable para '%s': %s", jerarquia, error)
             raise AnalysisParseError(
                 f"El análisis de '{jerarquia}' no encaja en el esquema: {error}",
+                causa=e,
+            ) from e
+
+    def analizar_adopcion(
+        self,
+        articulo: dict,
+        secciones: list[dict],
+    ) -> AdopcionResult:
+        """Vía 2 — ¿cubre el manual la obligación de este artículo?
+
+        Si no llega ninguna sección candidata **no se consulta al modelo**: la respuesta ya
+        se conoce y preguntarla costaría una llamada por cada artículo huérfano, que en un
+        corpus grande son muchos. Es además el caso que dispara la alerta de cobertura.
+        """
+        if not secciones:
+            return AdopcionResult(
+                nivel_adopcion="no_cubierto",
+                analisis_adopcion=(
+                    "Ninguna sección del manual se relaciona con este artículo por encima "
+                    "del umbral de similitud configurado."
+                ),
+                brechas=["El manual no aborda esta obligación"],
+            )
+
+        texto_secciones = "\n\n".join(
+            f"[{i}] {s.get('jerarquia', '?')}\n{str(s.get('texto', ''))[:600]}"
+            for i, s in enumerate(secciones[:5], 1)
+        )
+        entrada = {
+            "norma": articulo.get("titulo_norma") or articulo.get("doc_id", "?"),
+            "numero": articulo.get("numero", "?"),
+            "encabezado": articulo.get("encabezado", ""),
+            "contenido": str(articulo.get("contenido", ""))[:2000],
+            "secciones": texto_secciones,
+        }
+
+        try:
+            return self._adopcion_chain.invoke(entrada)
+        except Exception as e:
+            error = classify_llm_exception(e, modelo=self._model_id, url=self._base_url)
+            if isinstance(error, LLMUnavailableError):
+                logger.error("Vía 2 abortada por fallo de infraestructura: %s", error)
+                raise error from e
+            logger.error("Adopción no parseable para art. %s: %s",
+                         articulo.get("numero"), error)
+            raise AnalysisParseError(
+                f"El veredicto de adopción del art. {articulo.get('numero')} no encaja "
+                f"en el esquema: {error}",
                 causa=e,
             ) from e
 

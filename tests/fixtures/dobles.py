@@ -180,3 +180,51 @@ def fake_chat_model(
 
 # Alias en mayúscula para que lea como los demás dobles en las pruebas.
 FakeChatModel = fake_chat_model
+
+
+class FakeManualIndex:
+    """Índice inverso de prueba — la Vía 2 del ítem 6.
+
+    Devuelve las secciones que se le programen por artículo, sin FAISS ni embeddings.
+    `plan` mapea el `embed_text` del artículo a los `chunk_id` que debe recuperar.
+    """
+
+    def __init__(self, manual_df, plan: dict[str, list[str]] | None = None) -> None:
+        self.manual_df = manual_df
+        self.plan = plan or {}
+        self.llamadas = 0
+
+    def buscar_secciones(self, texto: str, top_k: int = 5, min_score: float = 0.30):
+        self.llamadas += 1
+        ids = self.plan.get(texto, [])
+        filas = self.manual_df[self.manual_df["chunk_id"].isin(ids)]
+        return [{**r, "similarity": 0.8} for r in filas.to_dict("records")][:top_k]
+
+
+class FakeGraderDual(FakeGrader):
+    """FakeGrader + el veredicto por artículo, con contador propio.
+
+    Separar los contadores de las dos vías es lo que permite verificar el DoD de coste:
+    que las llamadas sean |secciones| + |artículos| y no el producto.
+    """
+
+    def __init__(self, adopcion: dict[str, str] | None = None, **kw) -> None:
+        super().__init__(**kw)
+        self.adopcion = adopcion or {}
+        self.llamadas_adopcion = 0
+
+    def analizar_adopcion(self, articulo: dict, secciones: list[dict]):
+        from src.llm_grader import AdopcionResult
+
+        self.llamadas_adopcion += 1
+        if not secciones:
+            return AdopcionResult(
+                nivel_adopcion="no_cubierto",
+                analisis_adopcion="ninguna sección del manual lo aborda",
+                brechas=["El manual no cubre esta obligación"],
+            )
+        return AdopcionResult(
+            nivel_adopcion=self.adopcion.get(articulo.get("numero"), "cubierto"),
+            analisis_adopcion="veredicto determinista del doble",
+            secciones_relevantes=[s.get("jerarquia", "") for s in secciones],
+        )
