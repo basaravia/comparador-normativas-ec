@@ -11,8 +11,6 @@ Lo que estas pruebas fijan:
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 import pandas as pd
 import pytest
 
@@ -200,10 +198,12 @@ class TestHashDocumentos:
 
     def test_el_orden_de_los_archivos_no_altera_el_hash(self, tmp_path):
         a, b = tmp_path / "a.pdf", tmp_path / "b.pdf"
-        a.write_bytes(b"x" * 10); b.write_bytes(b"y" * 20)
+        a.write_bytes(b"x" * 10)
+        b.write_bytes(b"y" * 20)
         assert hash_documentos([a, b]) == hash_documentos([b, a])
 
     def test_anadir_un_documento_cambia_el_hash(self, tmp_path):
         a, b = tmp_path / "a.pdf", tmp_path / "b.pdf"
-        a.write_bytes(b"x" * 10); b.write_bytes(b"y" * 20)
+        a.write_bytes(b"x" * 10)
+        b.write_bytes(b"y" * 20)
         assert hash_documentos([a]) != hash_documentos([a, b])
