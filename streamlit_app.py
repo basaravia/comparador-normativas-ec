@@ -27,6 +27,7 @@ from app.logging_utils import clear_log_lines, get_log_lines, save_run_log, setu
 from app.theme import NIVEL_COLORS, inject_theme, render_header
 from src import config as cfg
 from src import service
+from app.run_manager import EstadoCorrida, RunHandle, gestor
 from src.errors import RunAbortedError
 from src.model_registry import modelos_disponibles, preflight
 from src.providers import Provider, ProviderSpec
@@ -343,8 +344,31 @@ with tab_compare:
                 + "\n\n".join(f"- {m}" for m in chequeo.mensajes)
             )
 
+        # Una corrida viva con la misma configuración bloquea el botón. Antes, pulsar
+        # "Ejecutar" tras refrescar lanzaba una segunda corrida sobre lo mismo y
+        # duplicaba el gasto de LLM sin que nadie lo notara (ítem 2).
+        import hashlib
+
+        cfg_hash = hashlib.sha256(
+            f"{config['llm_model']}|{config['embed_model']}|{mode}|{n_sample}".encode()
+        ).hexdigest()[:12]
+        en_curso = gestor().activa_con_config(cfg_hash)
+
+        if en_curso is not None:
+            st.info(
+                f"Corrida `{en_curso.run_id}` en marcha — "
+                f"{en_curso.progreso}/{en_curso.total} secciones."
+            )
+            st.progress(en_curso.porcentaje, text=en_curso.etiqueta_actual or "Procesando…")
+            if st.button("⏹ Cancelar corrida", type="secondary"):
+                gestor().cancelar(en_curso.run_id)
+                st.rerun()
+            with st.expander("📜 Registro de esta corrida", expanded=True):
+                st.code("\n".join(en_curso.lineas(30)) or "…", language="text")
+
         run_clicked = st.button(
-            "🚀 Ejecutar comparación", type="primary", disabled=not chequeo.ok
+            "🚀 Ejecutar comparación", type="primary",
+            disabled=not chequeo.ok or en_curso is not None,
         )
         progress_bar = st.progress(0.0, text="En espera…")
         log_box = st.empty()
@@ -361,16 +385,26 @@ with tab_compare:
             # una ruta fija y dos corridas se pisaban el reporte, sin forma de saber
             # cuál produjo cuál.
             rutas = service.RunPaths(run_id=service.nuevo_run_id())
+            # session_state guarda SOLO el run_id. Todo lo demás se re-adjunta desde el
+            # gestor de proceso, que es lo que sobrevive a un refresco del navegador.
             st.session_state["run_id"] = rutas.run_id
+            handle = RunHandle(run_id=rutas.run_id, total=total, config_hash=cfg_hash)
 
             def _on_progress(done: int, total_: int, row: dict) -> None:
                 label = str(row.get("jerarquia") or row.get("titulo_seccion") or "")[:60]
+                # Al handle primero: es lo que sobrevive a un refresco. Los widgets son
+                # de esta sesión y desaparecen con ella.
+                handle.progreso = done
+                handle.etiqueta_actual = f"{done}/{total_} · {label}"
+                gestor()._espejar(handle)
                 progress_bar.progress(done / total_, text=f"{done}/{total_} secciones · última: {label}")
-                log_box.code("\n".join(get_log_lines()[-12:]) or "…", language="text")
+                log_box.code("\n".join(handle.lineas(12)) or "…", language="text")
 
             t0 = time.time()
             logger.info("Iniciando comparación (%s, %d secciones, %d hilos)", mode, total, config["max_workers"])
             try:
+                gestor().registrar(handle)
+                handle.estado = EstadoCorrida.CORRIENDO
                 results_df = service.comparar(
                     st.session_state["normativa_index"],
                     selected_manual_df,
@@ -378,7 +412,9 @@ with tab_compare:
                     cfg,
                     progress_callback=_on_progress,
                     desc=mode,
+                    cancelar=handle.cancelar,
                 )
+                handle.estado = EstadoCorrida.COMPLETADO
                 st.session_state["results_df"] = results_df
                 # Una corrida completa borra la marca de la anterior. Sin esto, tras un
                 # aborto la pestaña de resultados sigue avisando "no usar como papel de

@@ -101,6 +101,7 @@ class DocumentComparator:
         desc: str = "Comparando secciones del manual",
         progress_callback: Optional[Callable[[int, int, dict], None]] = None,
         checkpoint: object | None = None,
+        cancelar: object | None = None,
     ) -> pd.DataFrame:
         """Ejecuta el pipeline completo con procesamiento concurrente via ThreadPoolExecutor.
 
@@ -171,6 +172,14 @@ class DocumentComparator:
 
             with tqdm(total=total, desc=desc, unit="sección", colour="cyan") as pbar:
                 while futures:
+                    # Cancelación cooperativa: se comprueba entre unidades, no se mata el
+                    # hilo. Interrumpir a la fuerza dejaría el checkpoint a medias.
+                    if cancelar is not None and cancelar.is_set():
+                        logger.info("Cancelación solicitada: se detiene tras %d unidades",
+                                    len(results))
+                        executor.shutdown(wait=False, cancel_futures=True)
+                        break
+
                     hecho = next(as_completed(list(futures)))
                     idx = futures.pop(hecho)
                     future = hecho
