@@ -2,7 +2,7 @@
 
 > ## Estado de ejecución · 2026-08-12
 >
-> **Fase 1 · Olas 0 y 1 cerradas.** Trabajo en `feature/comparador-v2`
+> **Fase 1 · Olas 0, 1 y 2 cerradas.** Trabajo en `feature/comparador-v2`
 > (`origin/feature/comparador-v2`); `main` conserva el baseline. **175 pruebas en
 > verde** en el entorno de desarrollo y en uno mínimo equivalente al de CI.
 >
@@ -15,7 +15,8 @@
 > | 1 | `feature/provider-seams` + `fix/provider-wiring` | **P-a** | ✅ |
 > | 1 | `feature/model-registry` | **4** | ✅ |
 > | 1 | `feature/design-tokens` | **T** | ✅ (incluye el ítem 14 del anexo) |
-> | 2 | `feature/service-layer`, `feature/run-manager` | 2, 3 | ⬜ Siguiente |
+> | 2 | `feature/service-layer` | S10 | ✅ La UI es vista; cero orquestación en ella |
+> | 2 | `feature/run-manager` | **2, 3** | ✅ Registro de proceso + reanudación sin reprocesar |
 > | 3 | `coverage-model`, `dual-analysis`, `scope-selector`, `review-flag` | 5, 6, 7, 10 | ⬜ |
 > | 4 | `semantic-chunking`, `papel-trabajo` | 8, 9 | ⬜ |
 >
