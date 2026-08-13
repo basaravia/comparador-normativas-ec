@@ -50,6 +50,16 @@ from .errors import (
 logger = logging.getLogger(__name__)
 
 
+def _id_unidad(fila: dict) -> str:
+    """Identidad estable de una sección del manual.
+
+    `chunk_id` es único por documento; la jerarquía es el respaldo para DataFrames que no
+    lo traigan. Sin identidad estable no hay reanudación posible: habría que fiarse del
+    orden de las filas, y basta con reordenar el manual para volver a analizarlo entero.
+    """
+    return str(fila.get("chunk_id") or fila.get("jerarquia") or fila.get("titulo_seccion", ""))
+
+
 class DocumentComparator:
     """Pipeline de comparación normativa vs manual con procesamiento concurrente.
 
@@ -90,6 +100,8 @@ class DocumentComparator:
         max_workers: int = MAX_WORKERS,
         desc: str = "Comparando secciones del manual",
         progress_callback: Optional[Callable[[int, int, dict], None]] = None,
+        checkpoint: object | None = None,
+        cancelar: object | None = None,
     ) -> pd.DataFrame:
         """Ejecuta el pipeline completo con procesamiento concurrente via ThreadPoolExecutor.
 
@@ -107,6 +119,25 @@ class DocumentComparator:
         rows = manual_df.to_dict("records")
         results: dict[int, dict] = {}
         total = len(rows)
+
+        # Reanudación: las unidades ya completadas no se vuelven a enviar al modelo.
+        # Es el punto del ítem 3 — cada una cuesta minutos de LLM y ya están pagadas.
+        ya_hechas: set[str] = set()
+        if checkpoint is not None:
+            ya_hechas = checkpoint.completadas()
+            if ya_hechas:
+                previos = checkpoint.cargar_parcial().to_dict("records")
+                for i, fila in enumerate(rows):
+                    uid = _id_unidad(fila)
+                    anterior = next(
+                        (r for r in previos if _id_unidad(r) == uid), None,
+                    )
+                    if anterior is not None:
+                        results[i] = anterior
+                logger.info(
+                    "Reanudando: %d de %d unidades ya completadas se omiten",
+                    len(results), total,
+                )
         fallos_consecutivos = 0
         abortar: ComparadorError | None = None
 
@@ -133,12 +164,22 @@ class DocumentComparator:
                         i, row = next(pendientes)
                     except StopIteration:
                         return
+                    if _id_unidad(row) in ya_hechas:
+                        continue      # ya la hizo una corrida anterior
                     futures[executor.submit(self._process_row, row, normativa_df)] = i
 
             _rellenar()
 
             with tqdm(total=total, desc=desc, unit="sección", colour="cyan") as pbar:
                 while futures:
+                    # Cancelación cooperativa: se comprueba entre unidades, no se mata el
+                    # hilo. Interrumpir a la fuerza dejaría el checkpoint a medias.
+                    if cancelar is not None and cancelar.is_set():
+                        logger.info("Cancelación solicitada: se detiene tras %d unidades",
+                                    len(results))
+                        executor.shutdown(wait=False, cancel_futures=True)
+                        break
+
                     hecho = next(as_completed(list(futures)))
                     idx = futures.pop(hecho)
                     future = hecho
@@ -178,6 +219,10 @@ class DocumentComparator:
                             break
 
                     pbar.update(1)
+                    # El checkpoint se escribe ANTES de notificar: si el proceso muere
+                    # entre ambos, se pierde una notificación, no una unidad de trabajo.
+                    if checkpoint is not None and idx in results:
+                        checkpoint.anexar(_id_unidad(results[idx]), results[idx])
                     if progress_callback is not None:
                         progress_callback(completed, total, results[idx])
 

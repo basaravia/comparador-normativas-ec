@@ -28,7 +28,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 import pandas as pd
 
@@ -261,6 +261,8 @@ def comparar(
     *,
     progress_callback: Optional[Callable[[int, int, dict], None]] = None,
     desc: str = "Comparando",
+    checkpoint: Any | None = None,
+    cancelar: Any | None = None,
 ) -> pd.DataFrame:
     """Fases 3-5 — grading y análisis comparativo.
 
@@ -275,6 +277,8 @@ def comparar(
         max_workers=config.max_workers,
         desc=desc,
         progress_callback=progress_callback,
+        checkpoint=checkpoint,
+        cancelar=cancelar,
     )
 
 

@@ -40,17 +40,35 @@ class _RedactingFormatter(logging.Formatter):
 
 
 class _StreamlitBufferHandler(logging.Handler):
-    """Acumula líneas formateadas en st.session_state para el panel en vivo."""
+    """Acumula líneas para el panel en vivo.
+
+    Escribe en el buffer de la corrida activa (a nivel de proceso) y, como respaldo, en
+    `st.session_state`.
+
+    El orden importa: la versión anterior **solo** usaba `session_state`, y los hilos
+    worker no tienen `ScriptRunContext`, así que la escritura fallaba en silencio y el
+    panel "Registro de ejecución" quedaba vacío justo durante la corrida — que es cuando
+    hace falta. El buffer por `run_id` no depende del contexto de Streamlit.
+    """
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
             line = self.format(record)
         except Exception:
             return
+
+        try:
+            from app.run_manager import gestor
+
+            for handle in gestor().activas():
+                handle.registrar(line)
+        except Exception:
+            pass  # el gestor puede no existir aún (import time, pruebas)
+
         try:
             st.session_state.setdefault(_SESSION_KEY, []).append(line)
         except Exception:
-            pass  # fuera de un script-run de Streamlit (p.ej. hilo sin contexto)
+            pass  # fuera de un script-run (hilo worker): el buffer de arriba ya lo tiene
 
 
 def setup_logging(level: int = logging.INFO) -> None:
