@@ -13,7 +13,14 @@ from .corpus import (
     normativa_ley,
     normativa_resolucion,
 )
-from .dobles import FakeChatModel, FakeEmbeddingBackend, FakeGrader, FakeIndex
+from .dobles import (
+    FakeChatModel,
+    FakeEmbeddingBackend,
+    FakeGrader,
+    FakeGraderDual,
+    FakeIndex,
+    FakeManualIndex,
+)
 
 __all__ = [
     "COBERTURA_ESPERADA",
@@ -27,5 +34,7 @@ __all__ = [
     "FakeChatModel",
     "FakeEmbeddingBackend",
     "FakeGrader",
+    "FakeGraderDual",
     "FakeIndex",
+    "FakeManualIndex",
 ]

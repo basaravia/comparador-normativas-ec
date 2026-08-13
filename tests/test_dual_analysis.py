@@ -9,56 +9,21 @@ from __future__ import annotations
 
 
 from src.dual import CacheGrading, ComparisonBundle, run_dual
-from src.llm_grader import AdopcionResult
-from tests.fixtures import COBERTURA_ESPERADA, FakeGrader, FakeIndex
-
-
-class _ManualIndexFalso:
-    """Índice inverso de prueba: devuelve las secciones que se le programen por artículo."""
-
-    def __init__(self, manual_df, plan=None):
-        self.manual_df = manual_df
-        self.plan = plan or {}
-        self.llamadas = 0
-
-    def buscar_secciones(self, texto, top_k=5, min_score=0.30):
-        self.llamadas += 1
-        ids = self.plan.get(texto, [])
-        filas = self.manual_df[self.manual_df["chunk_id"].isin(ids)]
-        return [{**r, "similarity": 0.8} for r in filas.to_dict("records")]
-
-
-class _GraderDual(FakeGrader):
-    """FakeGrader + la Vía 2, con contador propio."""
-
-    def __init__(self, adopcion=None, **kw):
-        super().__init__(**kw)
-        self.adopcion = adopcion or {}
-        self.llamadas_adopcion = 0
-
-    def analizar_adopcion(self, articulo, secciones):
-        self.llamadas_adopcion += 1
-        if not secciones:
-            return AdopcionResult(
-                nivel_adopcion="no_cubierto",
-                analisis_adopcion="ninguna sección lo aborda",
-                brechas=["no cubierto"],
-            )
-        nivel = self.adopcion.get(articulo.get("numero"), "cubierto")
-        return AdopcionResult(
-            nivel_adopcion=nivel,
-            analisis_adopcion="determinista",
-            secciones_relevantes=[s.get("jerarquia", "") for s in secciones],
-        )
+from tests.fixtures import (
+    COBERTURA_ESPERADA,
+    FakeGraderDual,
+    FakeIndex,
+    FakeManualIndex,
+)
 
 
 def _correr(normativa_df, manual_df, plan_v1=None, plan_v2=None, adopcion=None):
     from src.comparator import DocumentComparator
 
     indice = FakeIndex(normativa_df=normativa_df, plan=plan_v1 or {})
-    grader = _GraderDual(adopcion=adopcion)
+    grader = FakeGraderDual(adopcion=adopcion)
     comparador = DocumentComparator(normativa_index=indice, llm_grader=grader)
-    manual_index = _ManualIndexFalso(manual_df, plan_v2 or {})
+    manual_index = FakeManualIndex(manual_df, plan_v2 or {})
     bundle = run_dual(
         comparador=comparador, manual_index=manual_index,
         manual_df=manual_df, normativa_df=normativa_df,
