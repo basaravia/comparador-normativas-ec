@@ -3,9 +3,11 @@
 Pipeline de 5 fases para analizar el cumplimiento de manuales bancarios internos
 respecto a normativas ecuatorianas (SBS, BCE, SEPS, UAF, Asamblea Nacional).
 
-> **Estado:** Fase 1 del plan de mejoras, **olas 0 y 1 cerradas**. El trabajo vive en
-> `feature/comparador-v2`; `main` conserva el baseline. Ver `PLAN_MEJORAS_ANEXO.md`
-> para el alcance completo y qué queda por hacer.
+> **Estado:** Fase 1 del plan de mejoras, **olas 0, 1 y 2 cerradas**; de la Ola 3 ya
+> están fusionados el modelo de cobertura N:N (ítem 5) y el motor de doble vía (ítem 6).
+> Faltan la UI de la doble vía, el selector de alcance (ítem 7) y el flag de revisión
+> manual (ítem 10). El trabajo vive en `feature/comparador-v2`; `main` conserva el
+> baseline. Ver `PLAN_MEJORAS_ANEXO.md` para el alcance completo y qué queda por hacer.
 
 ---
 
@@ -25,7 +27,7 @@ conda env create -f dependencies/environment.yml
 conda activate normas_comparador
 
 # 3 · Verificar
-pytest -q                          # 175 passed
+pytest -q                          # 261 passed, 1 skipped
 streamlit run streamlit_app.py
 ```
 
@@ -63,6 +65,20 @@ Lo que cambió con la Ola 1 y se nota al usarla:
   fuera de la pestaña de índice.
 - Las filas sin análisis utilizable se cuentan aparte en vez de desaparecer del
   filtro por nivel de cumplimiento.
+
+Lo que se sumó en la Ola 2:
+
+- **La UI dejó de orquestar.** `streamlit_app.py` ya no construye sus propios backends
+  ni pasa por alto `settings`; todo el flujo entre pestañas vive en `src/service.py`
+  (S10), que Streamlit y, más adelante, una API HTTP pueden consumir por igual.
+- **Cada corrida tiene su carpeta.** `output/runs/<run_id>/` en vez de la ruta fija de
+  antes — dos corridas ya no se pisan el reporte, y el `run_id` viaja en
+  `session_state` en vez de todo el estado de la corrida.
+- **La corrida sobrevive a un refresco del navegador.** El registro de proceso vive en
+  `app/run_manager.py`, protegido por lock, con un botón para cancelar cooperativamente.
+- **Checkpoints con reanudación sin reprocesar.** `src/checkpoint.py` guarda entradas y
+  resultados parciales; motor conectado (`comparator.py`, `service.py`), aunque la UI
+  todavía no expone una sección propia de "reanudar corrida".
 
 ---
 
@@ -139,10 +155,17 @@ Lo que cambió con la Ola 1 y se nota al usarla:
 │  [fail-fast]     backend caído → RunAbortedError con los parciales     │
 │       │                                                                 │
 │       ▼  results_df  (+ estado_analisis, independiente del veredicto)  │
-│  [Excel]  output/comparador/reporte_comparacion.xlsx  ← design_tokens  │
-│  [JSON]   output/comparador/reporte_comparacion.json                   │
+│  [Excel]  output/runs/<run_id>/reporte_comparacion.xlsx ← design_tokens│
+│  [JSON]   output/runs/<run_id>/reporte_comparacion.json                │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
+
+**Ola 3 (ítems 5 y 6, motor ya fusionado):** sobre este mismo pipeline corre un segundo
+recorrido, en sentido opuesto — `src/manual_index.py` indexa el manual y `src/dual.py`
+pregunta *"¿qué sección cubre este artículo?"*, no solo *"¿qué artículo aplica a esta
+sección?"*. Las aristas de ambas vías conviven en `src/coverage.py` (`CoverageLink` /
+`LinkTable`), con caché de grading compartida para que el costo sea la suma de las dos
+vías y no el producto. Diagrama completo en `architecture/ARCHITECTURE.md`.
 
 ---
 
@@ -173,17 +196,23 @@ comparador-normativas-ec/
 │   ├── document_parser.py        ← Fase 1: NormativaParser + ManualParser
 │   ├── embeddings.py             ← backends + adaptador genérico de LangChain
 │   ├── search_engine.py          ← Fase 2: NormativaIndex (FAISS + léxico + reranker)
+│   ├── manual_index.py           ← Ola 3 (ítem 6): ManualIndex, FAISS invertido sobre el manual
 │   ├── llm_grader.py             ← Fases 3+4: LLMGrader
-│   └── comparator.py             ← Fase 5: DocumentComparator
+│   ├── comparator.py             ← Fase 5: DocumentComparator
+│   ├── coverage.py               ← Ola 3 (ítem 5): CoverageLink / LinkTable, modelo N:N
+│   ├── dual.py                   ← Ola 3 (ítem 6): run_dual(), Vía 1 + Vía 2
+│   ├── checkpoint.py             ← Ola 2 (ítem 3): persistencia incremental y reanudación
+│   └── service.py                ← Ola 2 (S10): orquestación sin Streamlit
 ├── app/
 │   ├── theme.py                  ← CSS, consume design_tokens
+│   ├── run_manager.py            ← Ola 2 (ítem 2): registro de corridas a nivel de proceso
 │   └── logging_utils.py          ← buffer del panel + redacción de secretos
 ├── tests/
 │   ├── fixtures/                 ← corpus sintético + dobles deterministas
-│   └── test_*.py                 ← 175 pruebas, ninguna toca la red
+│   └── test_*.py                 ← 261 pruebas + 1 skip, ninguna toca la red
 └── output/
     ├── docling/                  ← caché markdown (regenerable)
-    └── comparador/               ← salida del pipeline (fuera de git)
+    └── runs/<run_id>/            ← salida del pipeline por corrida (fuera de git)
 ```
 
 ---
@@ -333,6 +362,24 @@ hay norma aplicable"— y confundía las dos cosas.
 
 ---
 
+### Módulos Ola 2 — orquestación y corridas
+
+| Módulo | Rol |
+|---|---|
+| `service.py` | Orquestación del pipeline sin depender de Streamlit (S10). Sin estado: DataFrames e índice entran y salen por parámetro. Aquí vive `RunPaths` — cada corrida escribe bajo `output/runs/<run_id>/` |
+| `app/run_manager.py` | Registro de corridas **a nivel de proceso**, no de `session_state`: sobrevive a un refresco del navegador, con espejo en disco (`state.json`) y cancelación cooperativa |
+| `checkpoint.py` | Persistencia incremental: guarda filas completadas **y** las entradas (DataFrames + índice FAISS), para reanudar sin re-tabular ni recalcular embeddings. Conectado en `comparator.py`/`service.py`; la UI de Streamlit todavía no tiene una sección propia de "reanudar" |
+
+### Módulos Ola 3 — doble vía y cobertura (ítems 5 y 6)
+
+| Módulo | Rol |
+|---|---|
+| `coverage.py` | `CoverageLink` / `LinkTable`: la arista (artículo ↔ sección) como unidad, no la fila aplanada. `upsert` conserva la mejor observación de cada arista, no la última — el resultado no depende del orden en que corrieron las vías |
+| `manual_index.py` | `ManualIndex`: índice FAISS invertido sobre el manual, para que la Vía 2 pueda preguntar "¿qué sección cubre este artículo?" — módulo propio en vez de una subclase de `NormativaIndex` (justificación en su docstring) |
+| `dual.py` | `run_dual()`: corre la Vía 1 (manual→normativa) y la Vía 2 (normativa→manual) con **caché de grading compartida**, así el costo es la suma de las dos vías y no el producto |
+
+---
+
 ## Estado actual
 
 ### Fase 1.1 — NormativaParser (Docling)
@@ -355,7 +402,7 @@ Cabeceras/pies residuales en `contenido`: **0** ("ASAMBLEÍSTA POR LOJA" elimina
 
 Implementadas en sus módulos. Pendiente validación end-to-end completa en `master.ipynb` (requiere Docker Model Runner con `qwen3-embedding` + `gemma4`).
 
-### Plan de mejoras — olas 0 y 1 cerradas
+### Plan de mejoras — olas 0, 1 y 2 cerradas; Ola 3 en curso
 
 | Ítem | Qué resuelve | Estado |
 |---|---|---|
@@ -364,8 +411,12 @@ Implementadas en sus módulos. Pendiente validación end-to-end completa en `mas
 | §2.2 | Umbral de score cableado · aislamiento léxico entre normativas · prefijos e5 | ✅ |
 | P-a | Costuras de proveedor (sin SDKs de nube) | ✅ |
 | T | Tokens de diseño con fuente única | ✅ |
-| 2, 3 | Sincronía de estado y checkpoints | Ola 2 |
-| 5, 6, 7, 10 | Modelo N:N, doble vía, selector de alcance, revisión manual | Ola 3 |
+| S10 | UI como vista delgada; orquestación en `service.py` | ✅ Ola 2 |
+| 2, 3 | Registro de corridas a nivel de proceso + checkpoints con reanudación | ✅ Ola 2 (motor conectado; sin sección de reanudación en la UI aún) |
+| 5 | Modelo de cobertura N:N artículo↔sección | ✅ Ola 3 |
+| 6 | Doble vía (motor) — falta la UI | ✅ motor · ⬜ UI — Ola 3 |
+| 7 | Selector de alcance (dos selectores, confirmado) | ⬜ Ola 3 |
+| 10 | Flag de revisión manual (el modelo ya lo transporta) | ⬜ Ola 3 |
 | 8, 9 | Chunking semántico y papel de trabajo | Ola 4 |
 
 Detalle y criterios de aceptación en `PLAN_MEJORAS_ANEXO.md`.
@@ -375,7 +426,7 @@ Detalle y criterios de aceptación en `PLAN_MEJORAS_ANEXO.md`.
 ## Pruebas
 
 ```bash
-pytest -q                 # suite rápida: 175 passed, sin red ni modelos
+pytest -q                 # suite rápida: 261 passed, 1 skipped, sin red ni modelos
 pytest -m e2e             # las lentas, requieren backend real
 ruff check
 ```
@@ -433,8 +484,15 @@ entidades nombradas, para encontrar filiales que la denylist aún no conozca.
 | Resultados | 18–20 | Resumen estadístico, omisiones críticas, exportación Excel/JSON |
 | Uso modular | 21–22 | Carga de índice existente + análisis incremental |
 | **Fase 6** | **38–52** | **Verificación de subsanaciones** — cada celda demuestra un defecto corregido, contrastándolo con el comportamiento anterior. Corre en segundos con el corpus sintético: no necesita `document_test/` ni un modelo vivo |
+| **Fase 7** | **53–65** | **Doble vía y modelo de cobertura (Ola 3)** — `run_dual()`, `CoverageLink`/`LinkTable`, la alerta de cobertura que solo la Vía 2 puede producir, y la verificación de que el costo es la suma de las dos vías, no el producto. Corpus sintético, no necesita `document_test/` |
 
-> **Nota Fase 1.1:** La celda actual itera sobre `NORMATIVA_DIR.glob("*.pdf")`, lo que incluye `L1-XVI-cap-*.pdf` (no en caché). Mientras esos PDFs no estén pre-cacheados, usar `parse_pdf()` explícitamente sobre los 5 stems cacheados para evitar el segfault MPS al intentar convertirlos.
+> **Nota Fase 1.1:** la celda itera sobre `NORMATIVA_DIR.glob("*.pdf")` y por defecto solo
+> procesa los PDFs con caché Docling en `output/docling/*.md` (hoy 5 de 9; faltan los
+> `L1-XVI-cap-*`). `CONVERTIR_SIN_CACHE = True` los convierte en vivo forzando
+> `device="cpu"` para evitar el segfault MPS — más lento, pero seguro.
+>
+> Estos ajustes de la Fase 1.1 (rutas, guardas de caché) son detalles de robustez para
+> probar el pipeline end-to-end sin levantar la UI; no son parte de los ítems del plan.
 
 ---
 
@@ -497,19 +555,19 @@ jupyter lab master.ipynb
 Para ejecutar solo la Fase 1 (offline, segundos):
 
 ```python
+from pathlib import Path
 from src import NormativaParser
 import pandas as pd
 
-parser = NormativaParser(cache_dir="output/docling")  # lee caché, 0 conversiones
+CACHE_DIR = Path("output/docling")
+parser = NormativaParser(cache_dir=str(CACHE_DIR))  # lee caché, 0 conversiones
 
-stems = [
-    "PDL-DERECHOS-DIGITALES",
-    "LEY-ORGANICA-PARA-EL-FORTALECIMIENTO-DE-LA-CIBERSEGURIDAD_202652616421988",
-    "Proyecto-de-Ley-Organica-Organica-para-Reprimir-y-Prevenir-el-Lavado-de-Activos-y-la-Financiacion-del-Terrorismo",
-    "Proyecto-de-Ley-Transformacion-Digital-y-Audiovisual",
-    "Resoluci_n_N_SPDP_SPD_2026_0009_R_1771536870",
-]
-frames = [parser.parse_pdf(f"Normativa2026/{s}.pdf") for s in stems]
+# Los documentos se leen del directorio, no de una lista quemada — así una normativa
+# nueva no exige tocar este ejemplo. Por defecto solo se procesan los que ya tienen
+# caché Docling (ver "Nota Fase 1.1" arriba).
+pdfs = [p for p in sorted(Path("Normativa2026").glob("*.pdf"))
+        if (CACHE_DIR / f"{p.stem}.md").exists()]
+frames = [parser.parse_pdf(p) for p in pdfs]
 normativa_df = pd.concat(frames, ignore_index=True)
 
 # Filtrar solo artículos reales (excluir citas del preámbulo)

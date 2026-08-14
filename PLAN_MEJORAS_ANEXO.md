@@ -1,10 +1,11 @@
 # Plan de trabajo — Ítems 1 a 10 del Anexo, en tres fases
 
-> ## Estado de ejecución · 2026-08-12
+> ## Estado de ejecución · 2026-08-13
 >
-> **Fase 1 · Olas 0, 1 y 2 cerradas.** Trabajo en `feature/comparador-v2`
-> (`origin/feature/comparador-v2`); `main` conserva el baseline. **175 pruebas en
-> verde** en el entorno de desarrollo y en uno mínimo equivalente al de CI.
+> **Fase 1 · Olas 0, 1 y 2 cerradas; Ola 3 en curso (ítems 5 y 6-motor fusionados).**
+> Trabajo en `feature/comparador-v2` (`origin/feature/comparador-v2`); `main` conserva
+> el baseline. **261 pruebas en verde, 1 skip** (`pytest -q`) en el entorno de
+> desarrollo y en uno mínimo equivalente al de CI.
 >
 > | Ola | Rama | Ítem | Estado |
 > |-----|------|------|--------|
@@ -16,25 +17,32 @@
 > | 1 | `feature/model-registry` | **4** | ✅ |
 > | 1 | `feature/design-tokens` | **T** | ✅ (incluye el ítem 14 del anexo) |
 > | 2 | `feature/service-layer` | S10 | ✅ La UI es vista; cero orquestación en ella |
-> | 2 | `feature/run-manager` | **2, 3** | ✅ Registro de proceso + reanudación sin reprocesar |
-> | 3 | `coverage-model`, `dual-analysis`, `scope-selector`, `review-flag` | 5, 6, 7, 10 | ⬜ |
+> | 2 | `feature/run-manager` | **2, 3** | ✅ Registro de proceso + reanudación sin reprocesar — motor conectado (`comparator.py`, `service.py`, `app/run_manager.py`); la UI expone cancelar corrida, todavía no una sección explícita de reanudación |
+> | 3 | `feature/coverage-model` | **5** | ✅ Modelo de cobertura N:N artículo↔sección (`src/coverage.py`) |
+> | 3 | `feature/dual-analysis` | **6 (motor)** | ✅ Vía 1 + Vía 2 + `ManualIndex` + caché de grading compartida (`src/dual.py`, `src/manual_index.py`). **Falta la UI** (sub-pestañas por vía, tarjeta de cobertura) |
+> | 3 | `scope-selector` | **7** | ⬜ S1 ya confirmado (dos selectores, ver §4) — falta implementar `src/scope.py` |
+> | 3 | `review-flag` | **10** | ⬜ El modelo ya transporta `requiere_revision`/`motivos_revision`; falta vista y hoja del Excel |
 > | 4 | `semantic-chunking`, `papel-trabajo` | 8, 9 | ⬜ |
 >
 > **Los diez ítems del anexo siguen en la Fase 1.** Las fases 2 y 3 no añaden capacidad
 > analítica.
 >
-> ### Deuda declarada al cerrar la Ola 1
+> ### Deuda declarada al cerrar la Ola 1 — resuelta en la Ola 2, con dos residuos
 >
 > Salió de la auditoría del 2026-08-12 (ver §3.3 para el criterio de verificación):
 >
-> - **§3.3.1 `workspace_id`** — sin aplicar. `CoverageLink` debe nacer con él en el ítem 5.
-> - **§3.3.2 rutas por corrida** — sin aplicar; `output/comparador/*` sigue fijo.
->   Dueño: `feature/service-layer`.
-> - **§3.3.4/5 en la UI** — `streamlit_app.py` sigue construyendo sus backends y no pasa
->   por `settings`. Dueño: `feature/service-layer`. En `src/` ya está resuelto.
-> - **Deriva de referencias** — las citas `archivo:línea` de §2 y §7 apuntan a código que
->   se movió. Al ejecutar la Ola 2, verificar contra el símbolo (`_build_embedding_backend`,
->   `LLMGrader.__init__`), no contra el número de línea.
+> - **§3.3.1 `workspace_id`** — ✅ resuelto por `feature/service-layer`: `RunPaths.workspace`
+>   existe (`src/service.py::RunPaths`), pero nace en `None`, no en `"local"` como pedía la
+>   restricción original; queda para cuando la Fase 3 lo necesite de verdad.
+> - **§3.3.2 rutas por corrida** — ✅ resuelto para el pipeline: `RunPaths` escribe a
+>   `output/runs/<run_id>/…`. **Residuo**: el botón "Persistir índice" de
+>   `streamlit_app.py` (línea ~289) todavía escribe a la ruta fija
+>   `output/comparador/faiss_index/`, fuera del sistema de corridas.
+> - **§3.3.4/5 en la UI** — ✅ resuelto: `streamlit_app.py` ya no construye backends
+>   directamente; pasa por `src/service.py` y `src/model_registry.py`.
+> - **Deriva de referencias** — las citas `archivo:línea` de §2 y §7 siguen sin
+>   re-verificarse contra la Ola 2/3; el criterio sigue siendo el símbolo
+>   (`_build_embedding_backend`, `LLMGrader.__init__`), no el número de línea.
 > - **R1** — al abortar, las filas ya analizadas dentro de la ventana en vuelo se marcan
 >   `omitido`. Con `MAX_WORKERS=1` la exposición es una fila.
 >
@@ -255,17 +263,19 @@ lo que evita reescribir en la 2 y la 3.
 > El precio de esta lectura es que la deuda tiene que estar **declarada y con dueño**, o
 > deja de ser deuda y pasa a ser un olvido:
 >
-> | Restricción | Estado al cerrar la Ola 1 | Dueño |
+> | Restricción | Estado (2026-08-13, tras Ola 2 + ítems 5/6-motor) | Dueño |
 > |---|---|---|
-> | 1 · `workspace_id` | Sin aplicar. Cero apariciones en el repo; `index_meta.json` nació sin él | `feature/coverage-model` (ítem 5) — `CoverageLink` debe nacer con él |
-> | 2 · Rutas por corrida | Sin aplicar. `output/comparador/*` sigue fijo | `feature/service-layer` (Ola 2) |
+> | 1 · `workspace_id` | ✓ campo existe (`RunPaths.workspace`, `src/service.py`); nace en `None` en vez de `"local"` | resuelto por `feature/service-layer` |
+> | 2 · Rutas por corrida | ✓ `output/runs/<run_id>/…` en el pipeline; el botón "Persistir índice" de `streamlit_app.py` sigue escribiendo a `output/comparador/faiss_index/` fijo | resuelto por `feature/service-layer`, residuo puntual sin dueño asignado |
 > | 3 · Sin estado global | ✓ | — |
-> | 4 · Config por entorno | Mecanismo sí, cableado a medias: la UI no pasa por `settings` | `feature/service-layer` |
-> | 5 · Sin construcción directa de clientes | ✓ en `src/` desde `fix/provider-wiring`; `streamlit_app.py` pendiente | `feature/service-layer` |
+> | 4 · Config por entorno | ✓ la UI pasa por `settings`/`service` desde `feature/service-layer` | — |
+> | 5 · Sin construcción directa de clientes | ✓ en `src/` desde `fix/provider-wiring`; ✓ en `streamlit_app.py` desde `feature/service-layer` | — |
 > | 6 · Nada de macOS fuera de su sitio | ✓ desde `src/bootstrap.py` | — |
-> | 7 · Cómputo independiente del proceso | n/a hasta el ítem 3 | `feature/run-manager` |
+> | 7 · Cómputo independiente del proceso | ✓ registro de proceso en `app/run_manager.py`; checkpoints conectados en `comparator.py`/`service.py`, sin sección de reanudación explícita en la UI | `feature/run-manager` |
 >
 > **Ninguna de estas puede seguir abierta al cerrar la Fase 1**: §14 las da por ciertas.
+> Quedan dos residuos puntuales (workspace en `None`, botón de índice con ruta fija) que
+> no bloquean la Ola 3 pero conviene cerrar antes de dar la Fase 1 por terminada.
 
 1. **`workspace_id` en el modelo de datos desde el primer día**, aunque siempre valga `"local"`.
    Añadir el campo ahora a `CoverageLink`, al manifest del checkpoint y al papel de trabajo es
@@ -809,7 +819,8 @@ invocaciones.
 
 #### Ítem 7 — Selector de alcance por lista · `feature/scope-selector` · ~1.5 j
 
-**Bajo el supuesto S1 (dos selectores), sin confirmar.**
+**S1 (dos selectores) CONFIRMADO por el negocio el 2026-08-12 — ver §4.** Pendiente de
+implementar: no hay todavía código de `feature/scope-selector`.
 
 **Cambios**
 
@@ -1149,8 +1160,10 @@ aplicación en el tenant (requiere administrador); postura del banco sobre resid
 | `src/service.py` | S10 | Orquestación sin Streamlit — habilita la Fase 2 |
 | `app/run_manager.py` | 2, 3 | Corridas en background + re-attach |
 | `src/checkpoint.py` | 3 | Persistencia incremental y reanudación |
-| `src/coverage.py` | 5, 6, 10 | `CoverageLink`, `LinkTable`, vistas y cobertura |
-| `src/scope.py` | 7 | Filtros de alcance (puros) |
+| `src/coverage.py` | 5, 6, 10 | `CoverageLink`, `LinkTable`, vistas y cobertura — ✅ implementado |
+| `src/dual.py` | 6 | `run_dual()`: orquesta Vía 1 + Vía 2 y arma el `DualBundle` — ✅ implementado. **Desviación del plan**: aquí, no como `comparator.run_dual` (ver fila de `comparator.py` abajo) |
+| `src/manual_index.py` | 6 | `ManualIndex`, índice FAISS invertido sobre el manual para la Vía 2 — ✅ implementado. **Desviación del plan**: módulo propio, no `ManualIndex` dentro de `search_engine.py` — justificado en su docstring (evita heredar de `NormativaIndex` lo que no aplica) |
+| `src/scope.py` | 7 | Filtros de alcance (puros) — ⬜ pendiente |
 | `src/chunking.py` | 8 | Sub-chunking semántico parent-child |
 | `src/papel_trabajo.py` | 9 | Exportador Excel dirigido por plantilla |
 | `templates/papel_trabajo.yaml` | 9 | Definición de hojas y columnas |
@@ -1163,8 +1176,8 @@ aplicación en el tenant (requiere administrador); postura del banco sobre resid
 |---------|-------|--------------------|
 | `src/llm_grader.py` | 1, 4, 6, **P-a** | Clasificación de errores, grading robusto, `AdopcionResult`, chat model inyectado |
 | `src/embeddings.py` | **P-a** | `LangChainEmbeddingsAdapter` genérico; DMR pasa a caso particular |
-| `src/comparator.py` | 1, 3, 5, 6, **T** | Fail-fast, checkpoints, aristas N:N, `run_dual`, fills desde tokens |
-| `src/search_engine.py` | 5, 6, 8, §2.2, **P-a** | `SemanticIndex` + `ManualIndex`, léxico por documento, prefijos, `index_meta.json` |
+| `src/comparator.py` | 1, 3, 5, 6, **T** | Fail-fast, checkpoints, aristas N:N, fills desde tokens. `run_dual` terminó en `src/dual.py`, no aquí (ver §11 arriba) |
+| `src/search_engine.py` | 5, 6, 8, §2.2, **P-a** | `SemanticIndex`, léxico por documento, prefijos, `index_meta.json`. `ManualIndex` terminó en `src/manual_index.py`, no aquí |
 | `src/document_parser.py` | 8 | Integración del sub-chunking, sin truncado ciego |
 | `src/config.py` | varios | Nuevos parámetros; deja de ser fuente de credenciales |
 | `streamlit_app.py` | todos | Vista delgada sobre `service.py`: preflight, re-attach, selectores, doble vía, filtros |
@@ -1227,10 +1240,10 @@ sorpresa.**
 | Indexar el manual sube el consumo de RAM | Segfault/OOM ya visto en el proyecto | Índices construidos en secuencia, nunca simultáneos; `EMBED_BATCH_SIZE` conservador; se mantiene `KMP_DUPLICATE_LIB_OK` |
 | El refactor N:N rompe `master.ipynb` | Pérdida del flujo de trabajo actual | `results_df` y `export_excel()` como fachada (S5), fijados por `test_facade_compat.py` **antes** del refactor |
 | Modelos pequeños no producen JSON válido | El ítem 4 degrada todo a "revisión manual" | El preflight advierte sobre modelos por debajo del mínimo recomendado; se documenta el mínimo viable |
-| **S1 sin confirmar** | Retrabajo en la UI de la pestaña 3 | La lógica va en `src/scope.py`, independiente de la UI; un cambio de criterio solo afecta widgets |
+| ~~S1 sin confirmar~~ — **resuelto 2026-08-12** | Retrabajo en la UI de la pestaña 3 si el negocio cambiaba de idea | Confirmado: dos selectores (ver §4). La lógica va en `src/scope.py`, independiente de la UI; un cambio de criterio solo afectaría widgets |
 | El gold set de retrieval usa manuales confidenciales | Fuga de material corporativo | Consultas parafraseadas; el gold set referencia solo IDs de artículos públicos; `document_test/` sigue en `.gitignore` |
 | **Se pierde la disciplina de §3.3** | La Fase 2 o la 3 se convierten en un rewrite | Las siete restricciones son criterio de revisión de PR, no recomendaciones |
-| Fuga de credenciales o de identidad del cliente | Exposición **irreversible: el repo es público** | `redact()` obligatorio; `assets/brand/` y `.env` fuera de git; compuerta **local** pre-commit/commit-msg/pre-push + filtro que quita salidas de notebook (`.claude/scripts/instalar_guardas.sh`). CI es segunda red, no primera: corre después del push |
+| Fuga de credenciales o de identidad del cliente | Exposición **irreversible: el repo es público** | `redact()` obligatorio; `assets/brand/` y `.env` fuera de git; compuerta **local** pre-commit/commit-msg/pre-push + filtro que quita salidas de notebook (`scripts/guardas/instalar_guardas.sh`). CI es segunda red, no primera: corre después del push |
 | **La imagen Linux no compila (`ocrmac`)** | Bloquea la Fase 2 entera | Detectado y documentado en §9; se resuelve en la primera rama de esa fase |
 | Costos de nube sin control | Factura inesperada | Fase 3. El contador de llamadas del ítem 6 queda listo en Fase 1 para alimentar la estimación |
 

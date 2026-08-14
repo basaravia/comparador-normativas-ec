@@ -4,6 +4,30 @@ Entorno conda: **`puce-tesis`** (Python 3.13.5)
 
 ---
 
+## `master.ipynb` — notebook principal (pipeline completo)
+
+Es el notebook de producción: corre las 5 fases del pipeline (`src/`, ver
+`architecture/ARCHITECTURE.md`) más dos secciones de verificación de la Ola 2/3. Los
+notebooks `00`/`01`/`02` de abajo son anteriores a `src/` y sirven para depurar un PDF
+suelto o probar un backend, no para correr el comparador completo.
+
+| Sección | Contenido |
+| --- | --- |
+| Fases 1–5 | Tabulación (Docling), índice FAISS híbrido, `LLMGrader`, `DocumentComparator` — el mismo pipeline que expone `streamlit_app.py` |
+| Uso modular | Cargar el índice FAISS desde disco y correr un análisis incremental sin re-indexar |
+| **Fase 6** | **Verificación de subsanaciones** de las olas 0-2: cada celda contrasta el defecto corregido contra el comportamiento anterior, con corpus sintético — no necesita `document_test/` ni un modelo vivo |
+| **Fase 7** | **Doble vía y modelo de cobertura (Ola 3)**: `run_dual()`, `CoverageLink`/`LinkTable`, la alerta de cobertura que solo la Vía 2 puede producir, y la verificación de que el costo es la suma de las vías, no el producto — también con corpus sintético |
+
+Tabla celda-a-celda completa en el README, sección [`master.ipynb` — flujo del
+notebook](../README.md#masteripynb--flujo-del-notebook).
+
+**Fase 1.1 (nota de robustez, no del plan):** la celda de parseo de normativas lee
+`Normativa2026/*.pdf` del directorio y por defecto solo procesa los PDFs con caché
+Docling en `output/docling/*.md`. `CONVERTIR_SIN_CACHE = True` convierte el resto en
+vivo, forzando `device="cpu"` para evitar el segfault MPS conocido en Apple Silicon.
+
+---
+
 ## 00 · `00_pruebas.ipynb` — OCR con visión LLM
 
 **Cuándo usarlo:** el PDF es una imagen escaneada y no tiene capa de texto (ej. `Proyecto-de-Ley-Transformacion-Digital-y-Audiovisual.pdf`).
