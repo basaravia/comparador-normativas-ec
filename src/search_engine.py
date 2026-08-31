@@ -61,11 +61,13 @@ class NormativaIndex:
         use_reranker: bool = True,
         reranker_model: str = RERANKER_MODEL,
         reranker_spec: object | None = None,
+        vector_store_spec: object | None = None,
     ) -> None:
         self._backend = embedding_backend
         self._use_reranker = use_reranker
         self._index = None  # faiss.IndexFlatIP, lazy-loaded
         self._df: Optional[pd.DataFrame] = None
+        self._vector_store_spec = vector_store_spec
 
         # El reranker se construye **cuando se usa**, no aquí.
         #
@@ -89,7 +91,6 @@ class NormativaIndex:
         logger.info("Construyendo índice FAISS sobre %d elementos…", len(normativa_df))
         texts = normativa_df[text_col].fillna("").tolist()
 
-        import faiss
         # Defecto 3 de §2.2 del plan: el prefijo lo decide el backend (vía
         # `passage_prefix`/`query_prefix`), no `search_engine.py`. DMR no lo
         # quiere (backend.passage_prefix == ""); el backend local de
@@ -99,7 +100,10 @@ class NormativaIndex:
         vecs = self._backend.encode(texts, prefix=prefix)
         dim = vecs.shape[1]
 
-        self._index = faiss.IndexFlatIP(dim)
+        from .providers import Provider, ProviderSpec, build_vector_store
+
+        spec = self._vector_store_spec or ProviderSpec(proveedor=Provider.FAISS_LOCAL)
+        self._index = build_vector_store(spec, dim)
         self._index.add(vecs)
         self._df = normativa_df.reset_index(drop=True)
         logger.info("Índice listo: %d vectores, dim=%d", self._index.ntotal, dim)

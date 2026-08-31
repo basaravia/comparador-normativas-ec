@@ -17,6 +17,7 @@ eso no puede quedar escrito a mano en el grader.
 from __future__ import annotations
 
 import logging
+import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -58,6 +59,14 @@ class Provider(str, Enum):
     LOCAL_ST = "local_st"    # sentence-transformers en proceso
     RERANK_LOCAL = "rerank_local"      # CrossEncoder en proceso
     RERANK_HTTP = "rerank_http"        # endpoint de reranking remoto
+
+    # Docling en proceso (layout + OCR nativo del SO). La Fase 3 evalúa Azure AI
+    # Document Intelligence para el mismo rol de parser/OCR.
+    DOCLING_LOCAL = "docling_local"
+
+    # FAISS en memoria. La Fase 3 evalúa Azure AI Search para el mismo rol de
+    # vector store.
+    FAISS_LOCAL = "faiss_local"
 
 
 @dataclass(frozen=True)
@@ -110,6 +119,18 @@ CAPACIDADES: dict[Provider, ProviderCapabilities] = {
         # de su capacidad (defecto 3 de §2.2 del plan).
         prefijo_documento="passage: ",
         prefijo_consulta="query: ",
+    ),
+    Provider.DOCLING_LOCAL: ProviderCapabilities(
+        chat=False,
+        embeddings=False,
+        listado_modelos=False,
+        concurrencia_recomendada=1,
+    ),
+    Provider.FAISS_LOCAL: ProviderCapabilities(
+        chat=False,
+        embeddings=False,
+        listado_modelos=False,
+        concurrencia_recomendada=1,
     ),
 }
 
@@ -346,6 +367,102 @@ def _reranker_http(spec: ProviderSpec):
         return puntos
 
     return puntuar
+
+
+def resolve_device(device: str) -> str:
+    """Resuelve 'auto' → mps/cuda/cpu según el hardware disponible."""
+    if device != "auto":
+        return device
+    try:
+        import torch
+        if torch.backends.mps.is_available():
+            return "mps"
+        if torch.cuda.is_available():
+            return "cuda"
+    except ImportError:
+        pass
+    return "cpu"
+
+
+def _build_pdf_pipeline_options(device: str, do_ocr: bool, table_mode: str = "accurate"):
+    """Opciones de pipeline PDF de Docling (layout + tablas + OCR nativo).
+
+    En macOS usa OcrMacOptions (Vision del SO) → sin modelos que descargar.
+    ``table_mode`` = "accurate" (por defecto) o "fast" (más estable en sesiones largas)."""
+    from docling.datamodel.pipeline_options import (
+        PdfPipelineOptions,
+        TableFormerMode,
+        AcceleratorOptions,
+        AcceleratorDevice,
+    )
+
+    device_map = {
+        "mps": AcceleratorDevice.MPS,
+        "cuda": AcceleratorDevice.CUDA,
+        "cpu": AcceleratorDevice.CPU,
+        "auto": AcceleratorDevice.AUTO,
+    }
+    device_enum = device_map.get(device, AcceleratorDevice.AUTO)
+    tf_mode = TableFormerMode.FAST if table_mode == "fast" else TableFormerMode.ACCURATE
+
+    opts = PdfPipelineOptions()
+    opts.do_table_structure = True
+    opts.table_structure_options.mode = tf_mode
+    opts.accelerator_options = AcceleratorOptions(num_threads=4, device=device_enum)
+
+    if do_ocr and sys.platform == "darwin":
+        try:
+            from docling.datamodel.pipeline_options import OcrMacOptions
+            opts.do_ocr = True
+            opts.ocr_options = OcrMacOptions(force_full_page_ocr=False)
+        except ImportError:
+            opts.do_ocr = True
+    else:
+        opts.do_ocr = do_ocr
+    return opts
+
+
+def build_document_converter(spec: ProviderSpec) -> Any:
+    """Construye el conversor de documentos (PDF → texto/markdown). Cuarta costura,
+    junto a chat, embeddings y reranker.
+
+    Antes `NormativaParser` y `ManualParser` instanciaban `DocumentConverter` de Docling
+    cada uno por su cuenta. La Fase 3 evalúa Azure AI Document Intelligence para el mismo
+    rol de parser/OCR; esta costura es donde entra sin tocar los parsers.
+
+    ``spec.extra`` transporta lo que el pipeline de Docling necesita y que no tiene
+    hueco propio en `ProviderSpec`: ``do_ocr`` (bool) y ``table_mode``
+    ("accurate"/"fast") — cada parser calibra el suyo.
+    """
+    spec = spec.resuelto()
+    if spec.proveedor is not Provider.DOCLING_LOCAL:
+        raise ProviderConfigError(f"Proveedor de parser no soportado: {spec.proveedor.value}")
+
+    from docling.document_converter import DocumentConverter, PdfFormatOption
+    from docling.datamodel.base_models import InputFormat
+
+    device = resolve_device(spec.device)
+    do_ocr = bool(spec.extra.get("do_ocr", True))
+    table_mode = spec.extra.get("table_mode", "accurate")
+    opts = _build_pdf_pipeline_options(device, do_ocr, table_mode)
+    return DocumentConverter(format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=opts)})
+
+
+def build_vector_store(spec: ProviderSpec, dim: int) -> Any:
+    """Construye el índice vectorial. Quinta costura, junto a chat, embeddings,
+    reranker y parser.
+
+    Antes `NormativaIndex` y `ManualIndex` instanciaban `faiss.IndexFlatIP` cada uno por
+    su cuenta. La Fase 3 evalúa Azure AI Search para el mismo rol de vector store; esta
+    costura es donde entra sin tocar los índices.
+    """
+    spec = spec.resuelto()
+    if spec.proveedor is not Provider.FAISS_LOCAL:
+        raise ProviderConfigError(f"Proveedor de vector store no soportado: {spec.proveedor.value}")
+
+    import faiss
+
+    return faiss.IndexFlatIP(dim)
 
 
 def list_models(spec: ProviderSpec) -> list[str]:

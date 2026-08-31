@@ -17,7 +17,7 @@
 > | 1 | `feature/model-registry` | **4** | ✅ |
 > | 1 | `feature/design-tokens` | **T** | ✅ (incluye el ítem 14 del anexo) |
 > | 2 | `feature/service-layer` | S10 | ✅ La UI es vista; cero orquestación en ella |
-> | 2 | `feature/run-manager` | **2, 3** | ✅ Registro de proceso + reanudación sin reprocesar — motor conectado (`comparator.py`, `service.py`, `app/run_manager.py`); la UI expone cancelar corrida, todavía no una sección explícita de reanudación |
+> | 2 | `feature/run-manager` | **2, 3** | 🔶 Registro de proceso + reanudación sin reprocesar — motor conectado (`comparator.py`, `service.py`, `app/run_manager.py`); la UI expone cancelar corrida, todavía no una sección explícita de reanudación. Motor de checkpoint/reanudación implementado y probado (`tests/test_checkpoint.py`); la app Streamlit no expone `checkpoint=` a `service.comparar(...)` y falta el AppTest en `tests/test_streamlit_app_smoke.py` que el DoD original exige — pendiente |
 > | 3 | `feature/coverage-model` | **5** | ✅ Modelo de cobertura N:N artículo↔sección (`src/coverage.py`) |
 > | 3 | `feature/dual-analysis` | **6 (motor)** | ✅ Vía 1 + Vía 2 + `ManualIndex` + caché de grading compartida (`src/dual.py`, `src/manual_index.py`). **Falta la UI** (sub-pestañas por vía, tarjeta de cobertura) |
 > | 3 | `scope-selector` | **7** | ⬜ S1 ya confirmado (dos selectores, ver §4) — falta implementar `src/scope.py` |
@@ -269,7 +269,7 @@ lo que evita reescribir en la 2 y la 3.
 > | 2 · Rutas por corrida | ✓ `output/runs/<run_id>/…` en el pipeline; el botón "Persistir índice" de `streamlit_app.py` sigue escribiendo a `output/comparador/faiss_index/` fijo | resuelto por `feature/service-layer`, residuo puntual sin dueño asignado |
 > | 3 · Sin estado global | ✓ | — |
 > | 4 · Config por entorno | ✓ la UI pasa por `settings`/`service` desde `feature/service-layer` | — |
-> | 5 · Sin construcción directa de clientes | ✓ en `src/` desde `fix/provider-wiring`; ✓ en `streamlit_app.py` desde `feature/service-layer` | — |
+> | 5 · Costuras de proveedor (LLM, embeddings, parser/OCR, vector store, almacenamiento) | ✓ LLM/embeddings/reranker sin construcción directa de clientes en `src/` desde `fix/provider-wiring`, y en `streamlit_app.py` desde `feature/service-layer`; parser/OCR y vector store cerrados en la Ola 3 con sus propias fábricas en `src/providers.py` (tipo `build_parser()`/`build_vector_store()`), consumidas por `document_parser.py`/`search_engine.py` sin instanciar la implementación concreta | resuelto por `fix/provider-wiring` + Ola 3 |
 > | 6 · Nada de macOS fuera de su sitio | ✓ desde `src/bootstrap.py` | — |
 > | 7 · Cómputo independiente del proceso | ✓ registro de proceso en `app/run_manager.py`; checkpoints conectados en `comparator.py`/`service.py`, sin sección de reanudación explícita en la UI | `feature/run-manager` |
 >
@@ -289,7 +289,13 @@ lo que evita reescribir en la 2 y la 3.
 
 3. **Ningún estado global de proceso para el pipeline.** El registro de corridas y los
    artefactos van a disco bajo `workspace_id`/`run_id` desde ya. Evita que la Fase 3 tenga que
-   desmontar singletons cuando el autoescalado levante una segunda réplica.
+   desmontar singletons cuando el autoescalado levante una segunda réplica. **Aclaración** (la
+   redacción original era ambigua sobre esto): un singleton **a nivel de proceso sí está
+   permitido**, siempre que tenga espejo en disco — exactamente lo que implementa
+   `app/run_manager.py` con `_gestor` (el singleton en memoria) y `_espejar` (el espejo en
+   `output/workspaces/<ws>/runs/<run_id>/state.json`). Lo que está prohibido es un singleton
+   **sin** ese espejo: ahí sí se pierde el estado ante un redeploy o no es visible a una segunda
+   réplica.
 
 4. **Configuración por entorno, nunca hardcodeada.** Es P-a. En Fase 1 apunta a DMR local; en
    Fase 3, a Azure. Mismo código.
@@ -443,7 +449,7 @@ Al cerrar las cuatro olas, un único PR `feature/comparador-v2` → `main`.
   escaneo en CI corre *después* del push, cuando el material ya es visible. La compuerta
   tiene que estar en `pre-commit`, `commit-msg` y `pre-push`, y el filtro `clean` de git debe
   quitar las salidas de los notebooks antes de que entren al índice. Ya instalado en
-  `.claude/scripts/` (`instalar_guardas.sh`); CI queda como segunda red, no como primera.
+  `scripts/guardas/` (`instalar_guardas.sh`); CI queda como segunda red, no como primera.
 
 **DoD** — `pytest` corre sin el hack de `sys.path`; el CI falla ante un secreto commiteado.
 
@@ -722,6 +728,14 @@ y volver → idem; segunda pestaña del navegador → ve la misma corrida. Matar
 y reanudar → no se repite ninguna llamada LLM ya completada y el resultado final es idéntico al
 de una corrida ininterrumpida. No es posible lanzar dos corridas sobre la misma configuración.
 
+**Aclaración de estado (2026-08-13):** el criterio "matar el proceso a mitad y reanudar sin
+repetir llamadas" está cumplido **a nivel de módulo** — `DocumentComparator.run(checkpoint=...)`,
+con `tests/test_checkpoint.py` en verde — pero no de punta a punta vía la aplicación:
+`streamlit_app.py` no pasa `checkpoint=` a `service.comparar(...)`, no expone la sección
+"Corridas reanudables" descrita arriba, y falta el `AppTest` de reanudación en
+`tests/test_streamlit_app_smoke.py` que este mismo DoD exige. Mismo espíritu que la fila
+correspondiente de la tabla de estado de ejecución (§ inicio del documento).
+
 **Tests** — `tests/test_run_manager.py` (ciclo de vida, cancelación, re-attach tras limpiar
 `session_state`), `tests/test_checkpoint.py` (reanudación, invalidación por cambio de config,
 resistencia a un `rows.jsonl` truncado), y un caso `AppTest` en
@@ -862,6 +876,15 @@ sin tocar código. El alcance queda registrado en el checkpoint y en el papel de
 hoja "Revisión manual" lista el motivo de cada una.
 
 **Tests** — `tests/test_review_flag.py`: un caso por disparador.
+
+---
+
+**Fixes menores sin ítem numerado (Ola 3):** dos commits sobre `master.ipynb`, no adscritos a
+ningún ítem del plan —
+`d4211e2` (mensaje explicativo de `FileNotFoundError` cuando faltan los manuales, en vez del
+`ValueError` críptico de pandas) y
+`5c3a3df` (la celda 1.1 deriva del directorio `output/docling/` qué documentos ya tienen caché,
+en vez de una lista de stems quemada en el código).
 
 ---
 
@@ -1181,7 +1204,7 @@ aplicación en el tenant (requiere administrador); postura del banco sobre resid
 | `src/document_parser.py` | 8 | Integración del sub-chunking, sin truncado ciego |
 | `src/config.py` | varios | Nuevos parámetros; deja de ser fuente de credenciales |
 | `streamlit_app.py` | todos | Vista delgada sobre `service.py`: preflight, re-attach, selectores, doble vía, filtros |
-| `app/theme.py` | **T** | Consume `design_tokens`; corrige el contraste del sidebar (`:89-91`) |
+| `app/theme.py` | **T** | Consume `design_tokens`; corrige el contraste del sidebar (`:100-113`) |
 | `app/logging_utils.py` | 2 | Buffer de proceso por `run_id`; redacción de secretos |
 | `dependencies/requirements.txt` | **P-a**, 2 | `python-dotenv` pasa de declarado a usado; `streamlit>=1.59` |
 | `.gitignore` | **T**, S12 | `assets/brand/` excepto `_placeholder/` |

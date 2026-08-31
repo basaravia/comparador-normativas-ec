@@ -81,7 +81,7 @@ class TestRutasPorCorrida:
             assert r.directorio in artefacto.parents or artefacto.parent == r.directorio
 
     def test_el_workspace_esta_previsto_pero_inactivo(self, tmp_path):
-        """Hoy None; en Fase 3 es rellenar el parámetro, no un refactor (§3.3.1)."""
+        """Hoy el sentinela "local"; en Fase 3 es rellenar el parámetro, no un refactor (§3.3.1)."""
         sin_ws = RunPaths(run_id="x", raiz=tmp_path)
         con_ws = RunPaths(run_id="x", raiz=tmp_path, workspace="equipo-a")
         assert "workspaces" not in str(sin_ws.directorio)

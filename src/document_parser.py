@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import re
 import logging
-import sys
 from collections import Counter
 from pathlib import Path
 from typing import Optional
@@ -15,64 +14,9 @@ from typing import Optional
 import pandas as pd
 
 from .config import DOCLING_MAX_TOKENS
+from .providers import Provider, ProviderSpec, build_document_converter, resolve_device
 
 logger = logging.getLogger(__name__)
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Helpers Docling compartidos por NormativaParser y ManualParser
-# ──────────────────────────────────────────────────────────────────────────────
-def _resolve_device(device: str) -> str:
-    """Resuelve 'auto' → mps/cuda/cpu según el hardware disponible."""
-    if device != "auto":
-        return device
-    try:
-        import torch
-        if torch.backends.mps.is_available():
-            return "mps"
-        if torch.cuda.is_available():
-            return "cuda"
-    except ImportError:
-        pass
-    return "cpu"
-
-
-def _build_pdf_pipeline_options(device: str, do_ocr: bool, table_mode: str = "accurate"):
-    """Opciones de pipeline PDF de Docling (layout + tablas + OCR nativo).
-
-    En macOS usa OcrMacOptions (Vision del SO) → sin modelos que descargar.
-    ``table_mode`` = "accurate" (por defecto) o "fast" (más estable en sesiones largas)."""
-    from docling.datamodel.pipeline_options import (
-        PdfPipelineOptions,
-        TableFormerMode,
-        AcceleratorOptions,
-        AcceleratorDevice,
-    )
-
-    device_map = {
-        "mps": AcceleratorDevice.MPS,
-        "cuda": AcceleratorDevice.CUDA,
-        "cpu": AcceleratorDevice.CPU,
-        "auto": AcceleratorDevice.AUTO,
-    }
-    device_enum = device_map.get(device, AcceleratorDevice.AUTO)
-    tf_mode = TableFormerMode.FAST if table_mode == "fast" else TableFormerMode.ACCURATE
-
-    opts = PdfPipelineOptions()
-    opts.do_table_structure = True
-    opts.table_structure_options.mode = tf_mode
-    opts.accelerator_options = AcceleratorOptions(num_threads=4, device=device_enum)
-
-    if do_ocr and sys.platform == "darwin":
-        try:
-            from docling.datamodel.pipeline_options import OcrMacOptions
-            opts.do_ocr = True
-            opts.ocr_options = OcrMacOptions(force_full_page_ocr=False)
-        except ImportError:
-            opts.do_ocr = True
-    else:
-        opts.do_ocr = do_ocr
-    return opts
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Patrones regex para documentos normativos ecuatorianos (del notebook 01)
@@ -182,7 +126,7 @@ class NormativaParser:
         do_ocr: bool = True,
         cache_dir: str | Path | None = "output/docling",
     ) -> None:
-        self._device = _resolve_device(device)
+        self._device = resolve_device(device)
         self._do_ocr = do_ocr
         self._cache_dir = Path(cache_dir) if cache_dir else None
         self._converter = None  # construido perezosamente en la 1ª conversión
@@ -249,12 +193,12 @@ class NormativaParser:
 
     def _get_converter(self):
         if self._converter is None:
-            from docling.document_converter import DocumentConverter, PdfFormatOption
-            from docling.datamodel.base_models import InputFormat
-            opts = _build_pdf_pipeline_options(self._device, self._do_ocr)
-            self._converter = DocumentConverter(
-                format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=opts)}
+            spec = ProviderSpec(
+                proveedor=Provider.DOCLING_LOCAL,
+                device=self._device,
+                extra={"do_ocr": self._do_ocr, "table_mode": "accurate"},
             )
+            self._converter = build_document_converter(spec)
         return self._converter
 
     @staticmethod
@@ -518,7 +462,7 @@ class ManualParser:
         device: str = "auto",
     ) -> None:
         self.max_tokens = max_tokens
-        self._device = _resolve_device(device)
+        self._device = resolve_device(device)
 
     def parse_pdf(self, pdf_path: str | Path) -> pd.DataFrame:
         """Parsea un manual PDF y retorna un DataFrame estructurado."""
@@ -574,14 +518,14 @@ class ManualParser:
     # ── Pipeline Docling ──────────────────────────────────────────────────
 
     def _build_pipeline(self):
-        from docling.document_converter import DocumentConverter, PdfFormatOption
-        from docling.datamodel.base_models import InputFormat
         from docling.chunking import HybridChunker
 
         # FAST mode evita el crash de TableFormer en conversiones live (sin caché)
-        opts = _build_pdf_pipeline_options(self._device, do_ocr=True, table_mode="fast")
-        converter = DocumentConverter(
-            format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=opts)}
+        spec = ProviderSpec(
+            proveedor=Provider.DOCLING_LOCAL,
+            device=self._device,
+            extra={"do_ocr": True, "table_mode": "fast"},
         )
+        converter = build_document_converter(spec)
         chunker = HybridChunker(max_tokens=self.max_tokens)
         return converter, chunker

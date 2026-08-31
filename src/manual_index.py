@@ -37,10 +37,15 @@ class ManualIndex:
         secciones = indice.buscar_secciones(articulo["embed_text"], top_k=5)
     """
 
-    def __init__(self, embedding_backend: EmbeddingBackend) -> None:
+    def __init__(
+        self,
+        embedding_backend: EmbeddingBackend,
+        vector_store_spec: object | None = None,
+    ) -> None:
         self._backend = embedding_backend
         self._index = None
         self._df: Optional[pd.DataFrame] = None
+        self._vector_store_spec = vector_store_spec
 
     # ── construcción ──────────────────────────────────────────────────────
 
@@ -48,14 +53,15 @@ class ManualIndex:
         logger.info("Construyendo índice del manual sobre %d secciones…", len(manual_df))
         textos = manual_df[text_col].fillna("").tolist()
 
-        import faiss
-
         # El prefijo lo declara el backend, igual que en NormativaIndex: e5 lo exige y los
         # modelos servidos por endpoint no lo quieren (defecto 3 de §2.2).
         prefix = getattr(self._backend, "passage_prefix", "")
         vecs = self._backend.encode(textos, prefix=prefix)
 
-        self._index = faiss.IndexFlatIP(vecs.shape[1])
+        from .providers import Provider, ProviderSpec, build_vector_store
+
+        spec = self._vector_store_spec or ProviderSpec(proveedor=Provider.FAISS_LOCAL)
+        self._index = build_vector_store(spec, vecs.shape[1])
         self._index.add(vecs)
         self._df = manual_df.reset_index(drop=True)
         logger.info("Índice del manual listo: %d vectores, dim=%d",

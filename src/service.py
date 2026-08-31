@@ -124,18 +124,18 @@ class RunPaths:
     reporte y no había forma de saber cuál produjo qué — inaceptable en un papel de
     trabajo de auditoría, donde la trazabilidad es el punto (§3.3.2 del plan).
 
-    `workspace` está previsto pero hoy siempre vale None: cuando haya varios usuarios
-    (Fase 3), pasar a `output/workspaces/<ws>/runs/<run_id>/` es rellenar este parámetro,
-    no un refactor.
+    `workspace` está previsto pero hoy siempre vale el sentinela "local" (single-tenant):
+    cuando haya varios usuarios (Fase 3), pasar otro valor y escribir a
+    `output/workspaces/<ws>/runs/<run_id>/` es rellenar este parámetro, no un refactor.
     """
 
     run_id: str
     raiz: Path = RAIZ_SALIDA
-    workspace: str | None = None
+    workspace: str = "local"
 
     @property
     def directorio(self) -> Path:
-        base = self.raiz / "workspaces" / self.workspace if self.workspace else self.raiz
+        base = self.raiz / "workspaces" / self.workspace if self.workspace != "local" else self.raiz
         return base / "runs" / self.run_id
 
     @property
