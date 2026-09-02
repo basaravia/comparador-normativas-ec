@@ -1,0 +1,6 @@
+# Dependencias propias de este experimento, encima de dependencies/requirements-linux.txt.
+# No se agregan al requirements de producción: langchain-community/-huggingface solo
+# los usa este script aislado (langchain_community.vectorstores.FAISS,
+# langchain_huggingface para el modelo local de comparación).
+langchain-community==0.3.27
+langchain-huggingface==0.1.2
