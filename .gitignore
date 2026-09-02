@@ -20,6 +20,10 @@ output/docling/*_docling.json
 .claude/
 document_test
 .venv_*
+# Sin barra final a propósito: aquí .venv es un symlink (al venv del worktree
+# principal, para no reinstalar ~5GB de deps) y "foo/" en .gitignore NO matchea un
+# symlink llamado "foo" aunque apunte a un directorio — solo directorios reales.
+.venv
 
 # Políticas corporativas (documentos confidenciales - NO subir)
 output/rag_index/*.md
