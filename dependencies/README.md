@@ -73,6 +73,37 @@ razonamiento completo. Resumen:
 | Embeddings | Ollama, OpenAI-compat (`/v1`)     | `qwen3-embedding:0.6b` (1024d, GPU) |
 | Reranker   | sentence-transformers (CPU)       | `Qwen/Qwen3-Reranker-0.6B`          |
 
+### Por qué `qwen3-embedding:0.6b` como default de embeddings
+
+Validado con evidencia, no solo por ser el "recomendado" que citaba el config
+original de macOS: en `sandbox/embedding_eval/` (rama `sandbox/embedding-eval`,
+push-eada, no mergeada — es un experimento desechable, ver su propio README) se
+indexaron con FAISS 14 artículos reales de dos leyes bancarias españolas (BOE) y se
+consultaron con 14 secciones de manual parafraseadas a propósito, comparando 5
+modelos de embedding disponibles (Ollama, Vertex AI, local):
+
+| Modelo | top-1 (de 14) | MRR | margen prom. | costo |
+| --- | --- | --- | --- | --- |
+| `vertex/gemini-embedding-001` | 14 | 1.000 | +0.063 | pago (API) |
+| **`ollama/qwen3-embedding:0.6b`** | 13 | 0.964 | **+0.154** | gratis (GPU local) |
+| `local/multilingual-e5-large` | 13 | 0.964 | +0.021 | gratis (CPU local) |
+| `ollama/bge-m3` | 12 | 0.917 | +0.080 | gratis (GPU local) |
+| `vertex/text-multilingual-embedding-002` | 12 | 0.917 | +0.041 | pago (API) |
+
+`gemini-embedding-001` fue el único perfecto, pero cuesta por llamada y triplica la
+dimensión de índice (3072 vs 768-1024). `qwen3-embedding:0.6b` tuvo el **mayor margen
+de separación entre los modelos gratuitos** (cuando acierta, lo hace con confianza
+clara) — se mantiene como default por eso, no solo por ser gratis y local.
+
+**Decisión**: `qwen3-embedding:0.6b` sigue siendo el default. `gemini-embedding-001`
+vía `Provider.VERTEX` (`build_embedding_backend`, ya implementado) queda como opción
+de *fallback* para cuando el reranker marque un candidato como ambiguo — no como
+reemplazo general del default gratuito. Ese fallback automático (reranker ambiguo →
+reintento con Vertex) todavía no está implementado en `src/`; es una extensión futura
+si la tasa de error del default resulta costosa en producción con el corpus normativo
+real (SBS/BCE/SEPS/UAF), no algo que esta validación por sí sola justifique construir
+ahora.
+
 ### Instalación
 
 ```bash
