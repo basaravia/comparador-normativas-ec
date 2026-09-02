@@ -1,0 +1,62 @@
+# ── requirements-linux.txt ───────────────────────────────────────────────────
+# Variante de dependencies/requirements.txt para la rama comparador-v3-linux
+# (Linux x86_64, sin Docker Model Runner). El archivo original queda intacto
+# para no romper el flujo de macOS de feature/comparador-v2; este es su
+# equivalente para: LLM en Vertex AI, embeddings en Ollama, reranker con
+# sentence-transformers/transformers. Ver src/config.py para el porqué de
+# cada elección.
+#
+# Instalación:
+#   python3 -m venv .venv && source .venv/bin/activate
+#   pip install -r dependencies/requirements-linux.txt
+
+# ── Document parsing ─────────────────────────────────────────────────────────
+docling==2.55.1
+# (sin ocrmac: es OCR nativo de macOS/Vision framework; en Linux Docling usa
+# EasyOCR automáticamente, ya viene como dependencia transitiva de docling)
+
+# ── LangChain ─────────────────────────────────────────────────────────────────
+langchain==0.3.27
+langchain-core==0.3.79
+langchain-openai==0.3.35        # ChatOpenAI/OpenAIEmbeddings → apunta a Ollama (embeddings)
+# Pin exacto: >=3.0 exige langchain-core>=1.0, incompatible con
+# langchain==0.3.27/langchain-openai==0.3.35/langchain-docling==1.1.0
+# (langchain-core<1.0). 2.1.2 es la última de la serie 2.x, compatible.
+langchain-google-vertexai==2.1.2  # ChatVertexAI → Gemini vía Vertex AI (LLM)
+langchain-docling==1.1.0        # HybridChunker de Docling integrado en LangChain
+langchain-text-splitters==0.3.11
+openai==1.109.1                 # cliente base usado por langchain-openai
+httpx>=0.27.0
+
+# ── Vector search ─────────────────────────────────────────────────────────────
+faiss-cpu==1.14.2               # IndexFlatIP para búsqueda coseno
+
+# ── ML / embeddings / reranker ─────────────────────────────────────────────────
+# torch: necesario para Docling (TableFormer, layout) y el reranker CrossEncoder.
+# En Linux con NVIDIA instala con soporte CUDA automáticamente si hay driver.
+torch>=2.5.0
+torchvision>=0.20.0
+transformers>=4.50.0
+sentence-transformers>=3.0.0    # backend del reranker (CrossEncoder), CUDA-aware
+
+# ── Data / Export ─────────────────────────────────────────────────────────────
+pandas>=2.0.0
+numpy>=2.0.0
+openpyxl>=3.1.0
+pillow>=10.0.0
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+tqdm>=4.66.0
+pydantic>=2.10.0
+python-dotenv>=1.0.0
+
+# ── Jupyter ───────────────────────────────────────────────────────────────────
+ipykernel>=6.29.0
+ipywidgets>=8.1.0
+nbconvert>=7.16.0
+
+# ── UI ────────────────────────────────────────────────────────────────────────
+streamlit>=1.38.0
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+pytest>=8.0.0

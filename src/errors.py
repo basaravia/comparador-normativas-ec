@@ -197,13 +197,16 @@ def classify_llm_exception(
         "APIConnectionError", "APITimeoutError", "InternalServerError",
         "ConnectError", "ConnectTimeout", "ReadTimeout", "PoolTimeout",
         "NetworkError", "RemoteProtocolError",
+        # google.api_core.exceptions (Vertex AI / ChatVertexAI): mismo criterio que las
+        # de arriba — no mejoran en la fila siguiente sin que el backend se recupere.
+        "ResourceExhausted", "ServiceUnavailable", "DeadlineExceeded", "Aborted",
     ):
         return LLMUnavailableError(
             f"El backend de modelos no responde: {exc}", modelo=modelo, url=url, causa=exc,
         )
 
     # 4 · Credenciales y permisos: no se arreglan reintentando.
-    if nombre in ("AuthenticationError", "PermissionDeniedError"):
+    if nombre in ("AuthenticationError", "PermissionDeniedError", "PermissionDenied", "Unauthenticated"):
         return ProviderConfigError(f"Credenciales rechazadas por el proveedor: {exc}")
 
     # 5 · Conectividad por texto, para las envolturas que pierden el tipo original.

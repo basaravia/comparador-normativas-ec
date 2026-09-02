@@ -236,11 +236,20 @@ def construir_indice(normativa_df: pd.DataFrame, config: ServiceConfig) -> Norma
 
 
 def construir_comparador(indice: NormativaIndex, config: ServiceConfig) -> DocumentComparator:
-    """Arma el grader y el comparador. Único sitio donde se cablean sus parámetros."""
+    """Arma el grader y el comparador. Único sitio donde se cablean sus parámetros.
+
+    El LLM de análisis va por `Provider.VERTEX`, no por la firma clásica
+    (`model=`/`base_url=`) de `LLMGrader`: esa firma construye siempre un cliente
+    `Provider.DMR` (openai-compat), y en esta rama el LLM no vive ahí — vive en Vertex
+    AI, con su propia auth (ADC). `config.llm_model=None` deja que `ProviderSpec.resuelto()`
+    resuelva `VERTEX_LLM_MODEL` desde entorno/default, igual que ya hacía para DMR.
+    """
     grader = LLMGrader(
-        model=config.llm_model,
-        base_url=config.base_url,
-        temperature=config.temperature,
+        spec=ProviderSpec(
+            proveedor=Provider.VERTEX,
+            modelo=config.llm_model,
+            temperature=config.temperature,
+        ),
         max_tokens=config.llm_max_tokens,
         grader_max_tokens=config.grader_max_tokens,
     )

@@ -2,9 +2,10 @@
 
 Envuelve el pipeline de 5 fases de ``src/`` (el mismo usado en
 ``master.ipynb``): tabulación (Docling) → índice FAISS + léxico →
-reranking (CrossEncoder) → grading + análisis comparativo (LLM vía Docker
-Model Runner) → exportación. La barra lateral expone los parámetros de los
-modelos fundacionales (embeddings, LLM, reranker, umbrales de búsqueda).
+reranking (CrossEncoder, transformers) → grading + análisis comparativo
+(LLM vía Vertex AI) → exportación. La barra lateral expone los parámetros
+de los modelos fundacionales (embeddings vía Ollama, LLM vía Vertex,
+reranker, umbrales de búsqueda). Rama Linux — ver ``src/config.py``.
 
 Ejecutar con:  streamlit run streamlit_app.py
 """
@@ -80,13 +81,13 @@ def _sidebar_config() -> dict:
                 del st.session_state[key]
         st.rerun()
 
-    st.sidebar.markdown("#### Conexión")
-    dmr_base_url = st.sidebar.text_input("DMR base URL", value=cfg.DMR_BASE_URL, key="cfg_dmr_url")
+    st.sidebar.markdown("#### Conexión (embeddings — Ollama)")
+    dmr_base_url = st.sidebar.text_input("Ollama base URL", value=cfg.DMR_BASE_URL, key="cfg_dmr_url")
     modelos_backend = _modelos_del_backend(dmr_base_url)
     dmr_ok = bool(modelos_backend)
     st.sidebar.caption(
-        f"🟢 Backend conectado · {len(modelos_backend)} modelos disponibles"
-        if dmr_ok else "🔴 El backend no responde en esa URL"
+        f"🟢 Ollama conectado · {len(modelos_backend)} modelos disponibles"
+        if dmr_ok else "🔴 Ollama no responde en esa URL"
     )
 
     st.sidebar.markdown("#### Embeddings")
@@ -110,15 +111,20 @@ def _sidebar_config() -> dict:
         "Batch size", min_value=1, max_value=128, value=cfg.EMBED_BATCH_SIZE, key="cfg_embed_batch"
     )
 
-    st.sidebar.markdown("#### LLM (grading + análisis)")
-    llm_model = st.sidebar.selectbox(
-        "Modelo LLM",
-        options=_opciones_modelo(modelos_backend, cfg.DMR_LLM_MODEL),
-        index=0,
-        key="cfg_llm_model_select",
+    st.sidebar.markdown("#### LLM (grading + análisis — Vertex AI)")
+    # A diferencia de embeddings, el LLM no vive en Ollama: es texto libre, no un
+    # desplegable poblado desde `modelos_backend` (eso listaría modelos de Ollama, que
+    # no son los que Vertex sirve). Vertex no expone un endpoint de listado homogéneo
+    # (ver Provider.VERTEX en providers.py, listado_modelos=False) — igual que ya pasaba
+    # con RERANK_HTTP/DOCLING_LOCAL, el preflight se salta esa validación sin inventar
+    # un error donde no hay evidencia.
+    llm_model = st.sidebar.text_input(
+        "Modelo Vertex (Gemini)", value=cfg.VERTEX_LLM_MODEL, key="cfg_llm_model",
     )
-    if llm_model == "Personalizado…":
-        llm_model = st.sidebar.text_input("Modelo LLM (custom)", value=cfg.DMR_LLM_MODEL, key="cfg_llm_model_custom")
+    st.sidebar.caption(
+        f"Proyecto: `{cfg.VERTEX_PROJECT_ID}` · región: `{cfg.VERTEX_LOCATION}` — "
+        "requiere GOOGLE_APPLICATION_CREDENTIALS en el entorno."
+    )
     temperature = st.sidebar.slider("Temperatura", 0.0, 1.0, cfg.LLM_TEMPERATURE, 0.05, key="cfg_temperature")
     llm_max_tokens = st.sidebar.number_input(
         "Max tokens (análisis)", min_value=512, max_value=16384, value=cfg.LLM_MAX_TOKENS, step=256, key="cfg_llm_max_tokens"
@@ -332,10 +338,14 @@ with tab_compare:
         # dejar arrancar. Sin esto, un modelo mal escrito se descubría a mitad de una
         # corrida de horas — y con el ítem 1 ya no produce filas falsas, pero sigue
         # costando el tiempo (ítem 4).
-        _spec = ProviderSpec(proveedor=Provider.DMR, base_url=config["dmr_base_url"])
+        # Dos specs porque LLM y embeddings ya no comparten backend (rama Linux): el LLM
+        # va a Vertex (sin listado; preflight se salta esa validación) y los embeddings
+        # a Ollama vía openai-compat (sí lista, y sí se valida contra la lista real).
+        _spec_llm = ProviderSpec(proveedor=Provider.VERTEX)
+        _spec_embed = ProviderSpec(proveedor=Provider.DMR, base_url=config["dmr_base_url"])
         chequeo = preflight(
-            _spec, config["llm_model"],
-            _spec if config["embed_backend_kind"] == "Docker Model Runner" else None,
+            _spec_llm, config["llm_model"],
+            _spec_embed if config["embed_backend_kind"] == "Docker Model Runner" else None,
             config["embed_model"] if config["embed_backend_kind"] == "Docker Model Runner" else None,
         )
         if not chequeo.ok:
@@ -439,7 +449,7 @@ with tab_compare:
                 st.error(
                     f"**Corrida detenida.** {e.completadas} de {e.total} secciones "
                     f"analizadas; **{e.omitidas} quedaron sin procesar**.\n\n"
-                    f"Modelo: `{config['llm_model']}` · Endpoint: `{config['dmr_base_url']}`\n\n"
+                    f"Modelo: `{config['llm_model']}` (Vertex AI, proyecto `{cfg.VERTEX_PROJECT_ID}`)\n\n"
                     f"Causa: {e.causa}"
                 )
                 if e.parciales is not None and len(e.parciales):

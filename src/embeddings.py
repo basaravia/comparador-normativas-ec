@@ -225,14 +225,11 @@ class SentenceTransformersEmbeddings(EmbeddingBackend):
 
     @staticmethod
     def _resolve_device(device: str) -> str:
-        if device != "auto":
-            return device
-        try:
-            import torch
-            if torch.backends.mps.is_available():
-                return "mps"
-            if torch.cuda.is_available():
-                return "cuda"
-        except ImportError:
-            pass
-        return "cpu"
+        # Delegado a providers.resolve_device: implementarlo aquí también duplicaría el
+        # chequeo de que el wheel de torch trae kernels para la GPU presente (no solo
+        # que hay driver), que es lo que corrigió el bug de "auto" cayendo a una CUDA
+        # que en realidad no podía ejecutar nada en esta máquina (GTX 960M, sm_50 no
+        # cubierto por los wheels recientes).
+        from .providers import resolve_device
+
+        return resolve_device(device)

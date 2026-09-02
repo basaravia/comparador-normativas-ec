@@ -30,6 +30,11 @@ from .config import (
     EMBED_BATCH_SIZE,
     LLM_MAX_TOKENS,
     LLM_TEMPERATURE,
+    VERTEX_EMBED_LOCATION,
+    VERTEX_EMBED_MODEL,
+    VERTEX_LLM_MODEL,
+    VERTEX_LOCATION,
+    VERTEX_PROJECT_ID,
 )
 from .errors import ProviderConfigError
 from .settings import faltantes, get
@@ -55,6 +60,13 @@ class Provider(str, Enum):
     # Alias histórico del anterior. Se conserva porque `config.py`, la UI y el
     # `.env.example` lo nombran; apunta a la misma fábrica.
     DMR = "openai_compat"
+
+    # Vertex AI (Gemini) para chat. Añadido en la rama Linux: la Fase 3 de la que habla
+    # el docstring del módulo llegó antes por necesidad de hardware que por calendario
+    # — sin backend local viable para el LLM de análisis (ver config.py), se adelantó
+    # el primer proveedor de nube, ya con auth propia (ADC vía
+    # GOOGLE_APPLICATION_CREDENTIALS) en vez de la del openai-compat de arriba.
+    VERTEX = "vertex"
 
     LOCAL_ST = "local_st"    # sentence-transformers en proceso
     RERANK_LOCAL = "rerank_local"      # CrossEncoder en proceso
@@ -96,6 +108,20 @@ CAPACIDADES: dict[Provider, ProviderCapabilities] = {
         concurrencia_recomendada=1,
         timeout_s=180,
         max_retries=0,
+    ),
+    Provider.VERTEX: ProviderCapabilities(
+        chat=True,
+        # Opción validada (ver VERTEX_EMBED_* en config.py), no el default — Ollama
+        # sigue siéndolo. Misma auth (ADC) que el chat, por eso comparten Provider.
+        embeddings=True,
+        listado_modelos=False,  # sin endpoint de listado homogéneo; preflight no valida
+        requiere_env=("GOOGLE_APPLICATION_CREDENTIALS",),
+        # Nube, no backend local secuencial: el docstring del módulo ya anticipaba que
+        # esto se invertiría (timeout más corto, reintentos con backoff) al llegar el
+        # primer proveedor de nube.
+        concurrencia_recomendada=4,
+        timeout_s=60,
+        max_retries=2,
     ),
     Provider.RERANK_LOCAL: ProviderCapabilities(
         chat=False,
@@ -190,6 +216,28 @@ class ProviderSpec:
                 max_retries=self.max_retries,
                 extra=self.extra,
             )
+        if self.proveedor is Provider.VERTEX:
+            # Sin api_key: Vertex autentica con ADC (Application Default Credentials),
+            # resuelta por la librería a partir de GOOGLE_APPLICATION_CREDENTIALS — no
+            # hay credencial estática que pasar por `api_key` como en el openai-compat.
+            return ProviderSpec(
+                proveedor=self.proveedor,
+                modelo=get("VERTEX_LLM_MODEL", ui=self.modelo, default=VERTEX_LLM_MODEL),
+                base_url=self.base_url,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                batch_size=self.batch_size,
+                device=self.device,
+                api_key=self.api_key,
+                clave_env=self.clave_env,
+                timeout_s=self.timeout_s,
+                max_retries=self.max_retries,
+                extra={
+                    "project": get("VERTEX_PROJECT_ID", default=VERTEX_PROJECT_ID),
+                    "location": get("VERTEX_LOCATION", default=VERTEX_LOCATION),
+                    **self.extra,
+                },
+            )
         return self
 
 
@@ -231,6 +279,18 @@ def build_chat_model(spec: ProviderSpec) -> Any:
             temperature=spec.temperature,
             max_tokens=spec.max_tokens,
             timeout=spec.timeout_efectivo,
+            max_retries=spec.reintentos_efectivos,
+        )
+
+    if spec.proveedor is Provider.VERTEX:
+        from langchain_google_vertexai import ChatVertexAI
+
+        return ChatVertexAI(
+            model=spec.modelo,
+            project=spec.extra["project"],
+            location=spec.extra["location"],
+            temperature=spec.temperature,
+            max_output_tokens=spec.max_tokens,
             max_retries=spec.reintentos_efectivos,
         )
 
@@ -287,6 +347,27 @@ def build_embedding_backend(spec: ProviderSpec) -> Any:
             batch_size=spec.batch_size,
         )
 
+    if spec.proveedor is Provider.VERTEX:
+        # Resuelve modelo/región por su cuenta, sin apoyarse en lo que `resuelto()`
+        # ya dejó en `spec.modelo`/`spec.extra`: eso está calibrado para chat
+        # (VERTEX_LLM_MODEL, location="global") y aquí el par correcto es otro —
+        # VERTEX_EMBED_MODEL, location="us-central1" (ver el gotcha en config.py).
+        # Mezclar los dos apuntaría el cliente de embeddings al modelo o la región
+        # del LLM.
+        from langchain_google_vertexai import VertexAIEmbeddings
+
+        from .embeddings import LangChainEmbeddingsAdapter
+
+        modelo = get("VERTEX_EMBED_MODEL", default=VERTEX_EMBED_MODEL)
+        embedder = VertexAIEmbeddings(
+            model_name=modelo,
+            project=get("VERTEX_PROJECT_ID", default=VERTEX_PROJECT_ID),
+            location=get("VERTEX_EMBED_LOCATION", default=VERTEX_EMBED_LOCATION),
+        )
+        return LangChainEmbeddingsAdapter(
+            embedder, batch_size=spec.batch_size, nombre_modelo=modelo,
+        )
+
     raise ProviderConfigError(f"Proveedor de embeddings no soportado: {spec.proveedor.value}")
 
 
@@ -323,9 +404,11 @@ def _reranker_local(spec: ProviderSpec):
     import torch
     from sentence_transformers import CrossEncoder
 
-    device = spec.device
-    if device == "auto":
-        device = "mps" if torch.backends.mps.is_available() else "cpu"
+    # Antes solo distinguía "mps"/"cpu": en Linux con CUDA disponible, "auto" caía
+    # siempre a CPU y el reranker (~1.2GB, cabe de sobra en 4GB de VRAM) nunca tocaba
+    # la GPU. `resolve_device` ya sabe distinguir mps/cuda/cpu — se reutiliza en vez de
+    # duplicar la lógica una segunda vez con el mismo bug.
+    device = resolve_device(spec.device)
 
     model_kwargs = {"dtype": torch.float32}
     if device == "mps":
@@ -370,18 +453,45 @@ def _reranker_http(spec: ProviderSpec):
 
 
 def resolve_device(device: str) -> str:
-    """Resuelve 'auto' → mps/cuda/cpu según el hardware disponible."""
+    """Resuelve 'auto' → mps/cuda/cpu según el hardware disponible.
+
+    `torch.cuda.is_available()` solo confirma que hay un driver NVIDIA funcional; no
+    dice si el *wheel* de PyTorch instalado trae kernels compilados para la compute
+    capability de esa GPU en concreto. Los wheels oficiales recientes (torch>=2.9, p.ej.)
+    dejaron de compilar para Maxwell (sm_50 — GTX 960M entre otras): `is_available()`
+    sigue devolviendo True y el fallo real solo aparece a mitad de un forward pass, como
+    "CUDA error: no kernel image is available for execution on the device" (visto en
+    esta máquina al cargar el reranker). `_cuda_utilizable` cierra ese hueco.
+    """
     if device != "auto":
         return device
     try:
         import torch
         if torch.backends.mps.is_available():
             return "mps"
-        if torch.cuda.is_available():
+        if torch.cuda.is_available() and _cuda_utilizable():
             return "cuda"
     except ImportError:
         pass
     return "cpu"
+
+
+def _cuda_utilizable() -> bool:
+    """True si el wheel de torch instalado trae kernels para la GPU presente.
+
+    Exige coincidencia exacta con `torch.cuda.get_arch_list()` a propósito: un cubin
+    compilado para sm_80 no está garantizado a ejecutar en sm_86 sin el PTX de reserva
+    (no siempre embebido), y adivinar "compatible" aquí es exactamente el tipo de
+    optimismo que produjo el fallo que esta función existe para evitar.
+    """
+    import torch
+
+    try:
+        major, minor = torch.cuda.get_device_capability()
+    except Exception:
+        return False
+
+    return f"sm_{major}{minor}" in torch.cuda.get_arch_list()
 
 
 def _build_pdf_pipeline_options(device: str, do_ocr: bool, table_mode: str = "accurate"):
