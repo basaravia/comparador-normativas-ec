@@ -116,8 +116,8 @@ import {
 } from 'lucide-vue-next'
 import * as pdfjsLib from 'pdfjs-dist'
 
-// Configurar worker de pdfjs
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
+// Configurar worker de pdfjs local
+pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js'
 
 const props = defineProps<{
   tipo: 'normativa' | 'manual'
