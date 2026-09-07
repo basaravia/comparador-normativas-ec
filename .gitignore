@@ -28,6 +28,7 @@ output/rag_index/*.faiss
 output/rag_index/chunks_metadata.json
 output/markitdown/*POL*.md
 output/docling/*POL*.md
+output/docling/*.md
 
 # Planes de trabajo internos: por defecto NO se versionan, porque suelen citar
 # al cliente, rutas de documentos internos y hallazgos de auditoría.

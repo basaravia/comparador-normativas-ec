@@ -6,10 +6,11 @@ ReDoc en `/redoc`, especificación JSON en `/openapi.json` y colección Postman 
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any, Dict
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -94,43 +95,47 @@ app.include_router(index.router, dependencies=[SesionRequerida])
 app.include_router(compare.router, dependencies=[SesionRequerida])
 
 
-# ── Documentación interactiva protegida ───────────────────────────────────
-# `/docs` y `/redoc` los abre una persona en el navegador: redirigir a la SPA
-# (que muestra el login) es más útil que un 401 en crudo. `/openapi.json` lo
-# consume Swagger UI y herramientas, así que ahí sí corresponde el 401.
+# ── Documentación interactiva protegida con credenciales ───────────────────
+# Swagger UI, ReDoc y OpenAPI schema exigen autenticación (Basic Auth o cookie de sesión).
+# Al acceder desde el navegador, se solicita usuario y contraseña antes de cargar.
 
 OPENAPI_URL = "/openapi.json"
 
 
-def _redirigir_a_login(request: Request, destino: str) -> RedirectResponse | None:
-    """None si hay sesión; si no, redirección a la SPA con el destino a retomar."""
-    if obtener_sesion(request) is not None:
-        return None
-    return RedirectResponse(url=f"/?next={destino}", status_code=302)
-
-
 @app.get("/docs", include_in_schema=False)
-def docs_swagger(request: Request):
-    """Swagger UI interactivo; requiere sesión activa."""
-    redireccion = _redirigir_a_login(request, "/docs")
-    if redireccion is not None:
-        return redireccion
-    return get_swagger_ui_html(openapi_url=OPENAPI_URL, title=f"{app.title} — Swagger UI")
+def docs_swagger(request: Request, sesion: dict = Depends(require_session)):
+    """Swagger UI interactivo protegido con usuario y contraseña."""
+    return get_swagger_ui_html(
+        openapi_url=OPENAPI_URL,
+        title=f"{app.title} — Swagger UI",
+        swagger_ui_parameters={"persistAuthorization": True},
+    )
 
 
 @app.get("/redoc", include_in_schema=False)
-def docs_redoc(request: Request):
-    """Documentación ReDoc; requiere sesión activa."""
-    redireccion = _redirigir_a_login(request, "/redoc")
-    if redireccion is not None:
-        return redireccion
+def docs_redoc(request: Request, sesion: dict = Depends(require_session)):
+    """Documentación ReDoc protegida con usuario y contraseña."""
     return get_redoc_html(openapi_url=OPENAPI_URL, title=f"{app.title} — ReDoc")
 
 
 @app.get(OPENAPI_URL, include_in_schema=False)
-def openapi_protegido(_: dict = Depends(require_session)) -> Dict[str, Any]:
-    """Contrato OpenAPI 3.1; responde 401 sin sesión."""
-    return app.openapi()
+def openapi_protegido(request: Request, sesion: dict = Depends(require_session)) -> Dict[str, Any]:
+    """Contrato OpenAPI 3.1; protegido con credenciales."""
+    schema = app.openapi()
+    schema.setdefault("components", {}).setdefault("securitySchemes", {
+        "BasicAuth": {
+            "type": "http",
+            "scheme": "basic",
+            "description": "Autenticación con usuario y contraseña del sistema",
+        },
+        "BearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "description": "Token de sesión firmado",
+        },
+    })
+    schema["security"] = [{"BasicAuth": []}, {"BearerAuth": []}]
+    return schema
 
 
 @app.get("/api/postman.json", tags=["Sistema y Proveedores"], dependencies=[SesionRequerida])

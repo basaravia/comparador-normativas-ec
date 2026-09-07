@@ -107,24 +107,50 @@ def verificar_token_sesion(token: str) -> Optional[Dict[str, Any]]:
 
 
 def obtener_sesion(request: Request) -> Optional[Dict[str, Any]]:
-    """Sesión activa a partir de la cookie, o None. No lanza: para rutas opcionales."""
+    """Sesión activa a partir de cookie o cabecera Authorization (Basic o Bearer)."""
     if not is_auth_enabled():
         usuario, _ = get_configured_credentials()
         return {"sub": usuario, "auth_disabled": True}
+
+    # 1. Cookie de sesión del navegador (SPA)
     token = request.cookies.get(SESSION_COOKIE_NAME)
-    if not token:
-        return None
-    return verificar_token_sesion(token)
+    if token:
+        valida = verificar_token_sesion(token)
+        if valida:
+            return valida
+
+    # 2. Cabecera Authorization (Swagger UI, Postman, cURL)
+    auth_header = request.headers.get("Authorization", "").strip()
+    if auth_header:
+        # 2a. HTTP Basic Auth
+        if auth_header.lower().startswith("basic "):
+            try:
+                b64_creds = auth_header[6:].strip()
+                decoded = base64.b64decode(b64_creds).decode("utf-8")
+                if ":" in decoded:
+                    u, p = decoded.split(":", 1)
+                    if verify_credentials(u, p):
+                        return {"sub": u, "auth_type": "basic"}
+            except Exception:
+                pass
+        # 2b. Bearer Token
+        elif auth_header.lower().startswith("bearer "):
+            token = auth_header[7:].strip()
+            valida = verificar_token_sesion(token)
+            if valida:
+                return valida
+
+    return None
 
 
 def require_session(request: Request) -> Dict[str, Any]:
-    """Dependencia que exige sesión válida; responde 401 si no la hay."""
+    """Dependencia que exige sesión o credenciales válidas; responde 401 solicitando Basic Auth."""
     sesion = obtener_sesion(request)
     if sesion is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Sesión no válida o expirada. Inicie sesión en /api/auth/login.",
-            headers={"WWW-Authenticate": "Cookie"},
+            detail="Autenticación requerida para acceder a la API y documentación.",
+            headers={"WWW-Authenticate": 'Basic realm="Acceso al Comparador de Normativas"'},
         )
     return sesion
 

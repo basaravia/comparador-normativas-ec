@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Comparador de Normativas — API REST & SSE",
-    "description": "\n# 📑 Comparador Automatizado de Normativas vs Manuales Internos — API REST\n\nBienvenido a la API del **Pipeline de Análisis de Cumplimiento Normativo Bancario** (SBS, BCE, SEPS, UAF)\nfrente a manuales internos de entidades financieras.\n\n## 🚀 Flujo de Trabajo Diario (Workflow en 4 Pasos)\n\n1. **Documentos (`/api/documents`)**:\n   - Subir o consultar normativas y manuales en PDF.\n   - Tabular con Docling mediante `POST /api/documents/tabular`.\n   - Visualizar PDFs en alta fidelidad y streaming con `GET /api/documents/{tipo}/{doc_id}/pdf`.\n2. **Índice Semántico (`/api/index`)**:\n   - Construir el índice FAISS vectorial con chunking semántico parent-child (`POST /api/index/build`).\n   - Probar similitud y reranking con `POST /api/index/search`.\n3. **Comparación y Alcance (`/api/compare`)**:\n   - Configurar el alcance con `RunScope` y lanzar análisis en doble vía (`POST /api/compare/start`).\n   - Monitorear el progreso en tiempo real mediante Server-Sent Events (SSE) en `GET /api/compare/stream/{run_id}`.\n4. **Resultados y Entregables (`/api/compare/runs`)**:\n   - Consultar la Cobertura Global, hallazgos, alertas y motivos de revisión manual (`GET /api/compare/runs/{run_id}`).\n   - Descargar el **Papel de Trabajo de Auditoría en Excel** de 6 hojas (`GET /api/compare/runs/{run_id}/export/excel`).\n\n## 🛠️ Herramientas de Integración\n\n- **Swagger UI Interactivo**: Pruebe cada endpoint directamente desde el navegador en [`/docs`](/docs).\n- **ReDoc Documentación**: Visualización de especificación completa en [`/redoc`](/redoc).\n- **Contrato OpenAPI 3.1**: Descargue el esquema estándar en [`/openapi.json`](/openapi.json) para importar en Swagger Editor.\n- **Colección Postman**: Descargue la colección lista para usar en [`/api/postman.json`](/api/postman.json).\n",
+    "description": "\n# 📑 Comparador Automatizado de Normativas vs Manuales Internos — API REST\n\nBienvenido a la API del **Pipeline de Análisis de Cumplimiento Normativo Bancario** (SBS, BCE, SEPS, UAF)\nfrente a manuales internos de entidades financieras.\n\n## 🔐 Autenticación\n\nToda la API (salvo `/api/health`, `/api/theme/tokens` y `/api/auth/*`) exige una **sesión activa**.\n\n1. `POST /api/auth/login` con `{\"username\": \"...\", \"password\": \"...\"}` emite la cookie firmada\n   `auth_session` (HttpOnly, `SameSite=Lax`), que el navegador reenvía sola en las llamadas\n   posteriores —incluidos el streaming SSE y el visor de PDF—.\n2. `GET /api/auth/me` valida la sesión vigente; `POST /api/auth/logout` la revoca.\n3. Las credenciales se configuran en `.env` con `AUTH_USERNAME` y `AUTH_PASSWORD`.\n\n`/docs`, `/redoc` y `/openapi.json` también quedan detrás de la sesión: sin ella, `/docs` y\n`/redoc` redirigen a la pantalla de acceso y `/openapi.json` responde 401.\n\n## 🚀 Flujo de Trabajo Diario (Workflow en 4 Pasos)\n\n1. **Documentos (`/api/documents`)**:\n   - Subir o consultar normativas y manuales en PDF.\n   - Tabular con Docling mediante `POST /api/documents/tabular`.\n   - Visualizar PDFs en alta fidelidad y streaming con `GET /api/documents/{tipo}/{doc_id}/pdf`.\n2. **Índice Semántico (`/api/index`)**:\n   - Construir el índice FAISS vectorial con chunking semántico parent-child (`POST /api/index/build`).\n   - Probar similitud y reranking con `POST /api/index/search`.\n3. **Comparación y Alcance (`/api/compare`)**:\n   - Configurar el alcance con `RunScope` y lanzar análisis en doble vía (`POST /api/compare/start`).\n   - Monitorear el progreso en tiempo real mediante Server-Sent Events (SSE) en `GET /api/compare/stream/{run_id}`.\n4. **Resultados y Entregables (`/api/compare/runs`)**:\n   - Consultar la Cobertura Global, hallazgos, alertas y motivos de revisión manual (`GET /api/compare/runs/{run_id}`).\n   - Descargar el **Papel de Trabajo de Auditoría en Excel** de 6 hojas (`GET /api/compare/runs/{run_id}/export/excel`).\n\n## 🛠️ Herramientas de Integración\n\n- **Swagger UI Interactivo**: Pruebe cada endpoint directamente desde el navegador en [`/docs`](/docs).\n- **ReDoc Documentación**: Visualización de especificación completa en [`/redoc`](/redoc).\n- **Contrato OpenAPI 3.1**: Descargue el esquema estándar en [`/openapi.json`](/openapi.json) para importar en Swagger Editor.\n- **Colección Postman**: Descargue la colección lista para usar en [`/api/postman.json`](/api/postman.json).\n",
     "version": "4.0.0"
   },
   "paths": {
@@ -43,6 +43,138 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProvidersResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/theme/tokens": {
+      "get": {
+        "tags": [
+          "Diseño y Tokens"
+        ],
+        "summary": "Get Theme Tokens",
+        "description": "Retorna los tokens de diseño y las variables CSS para estilizar la aplicación.",
+        "operationId": "get_theme_tokens_api_theme_tokens_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Theme Tokens Api Theme Tokens Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "tags": [
+          "Autenticación"
+        ],
+        "summary": "Login",
+        "description": "Valida credenciales y emite la cookie de sesión firmada `auth_session`.",
+        "operationId": "login_api_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "tags": [
+          "Autenticación"
+        ],
+        "summary": "Logout",
+        "description": "Borra la cookie de sesión. Idempotente: sirve aunque no hubiera sesión.",
+        "operationId": "logout_api_auth_logout_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogoutResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "tags": [
+          "Autenticación"
+        ],
+        "summary": "Me",
+        "description": "Valida la sesión activa y retorna el usuario autenticado (401 si no la hay).",
+        "operationId": "me_api_auth_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/status": {
+      "get": {
+        "tags": [
+          "Autenticación"
+        ],
+        "summary": "Status Sesion",
+        "description": "Estado de sesión sin fallar con 401.\n\nLa SPA lo consulta al arrancar para decidir si pinta el login o la app: un 401\nen la consola del navegador en cada carga inicial es ruido, no información.",
+        "operationId": "status_sesion_api_auth_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
                 }
               }
             }
@@ -475,30 +607,6 @@
         }
       }
     },
-    "/api/theme/tokens": {
-      "get": {
-        "tags": [
-          "Diseño y Tokens"
-        ],
-        "summary": "Get Theme Tokens",
-        "description": "Retorna los tokens de diseño y las variables CSS para estilizar la aplicación.",
-        "operationId": "get_theme_tokens_api_theme_tokens_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Get Theme Tokens Api Theme Tokens Get"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/postman.json": {
       "get": {
         "tags": [
@@ -689,6 +797,66 @@
           "elapsed_seconds"
         ],
         "title": "IndexBuildResponse"
+      },
+      "LoginRequest": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "title": "Username",
+            "description": "Usuario autorizado (AUTH_USERNAME)."
+          },
+          "password": {
+            "type": "string",
+            "title": "Password",
+            "description": "Contraseña asociada (AUTH_PASSWORD)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "LoginRequest"
+      },
+      "LoginResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          },
+          "usuario": {
+            "type": "string",
+            "title": "Usuario"
+          },
+          "expira_en": {
+            "type": "integer",
+            "title": "Expira En",
+            "description": "Vigencia de la sesión en segundos."
+          }
+        },
+        "type": "object",
+        "required": [
+          "usuario",
+          "expira_en"
+        ],
+        "title": "LoginResponse"
+      },
+      "LogoutResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          },
+          "mensaje": {
+            "type": "string",
+            "title": "Mensaje",
+            "default": "Sesión cerrada."
+          }
+        },
+        "type": "object",
+        "title": "LogoutResponse"
       },
       "ProviderInfo": {
         "properties": {
@@ -986,6 +1154,41 @@
         ],
         "title": "SearchResultItem"
       },
+      "SessionResponse": {
+        "properties": {
+          "autenticado": {
+            "type": "boolean",
+            "title": "Autenticado"
+          },
+          "usuario": {
+            "type": "string",
+            "title": "Usuario",
+            "default": ""
+          },
+          "expira_en": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expira En",
+            "description": "Marca de tiempo Unix de expiración."
+          },
+          "auth_habilitada": {
+            "type": "boolean",
+            "title": "Auth Habilitada",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "autenticado"
+        ],
+        "title": "SessionResponse"
+      },
       "StartCompareRequest": {
         "properties": {
           "dual_mode": {
@@ -1155,6 +1358,26 @@
         ],
         "title": "ValidationError"
       }
+    },
+    "securitySchemes": {
+      "BasicAuth": {
+        "type": "http",
+        "scheme": "basic",
+        "description": "Autenticación con usuario y contraseña del sistema"
+      },
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Token de sesión firmado"
+      }
     }
-  }
+  },
+  "security": [
+    {
+      "BasicAuth": []
+    },
+    {
+      "BearerAuth": []
+    }
+  ]
 }
