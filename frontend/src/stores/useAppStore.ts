@@ -44,6 +44,12 @@ export interface ActiveEvidence {
 
 export const useAppStore = defineStore('app', {
   state: () => ({
+    // Autenticación
+    isAuthenticated: false,
+    authUsername: '',
+    authChecking: true,
+    authError: null as string | null,
+
     currentStep: 1,
     // Estado del sistema y proveedores
     serverHealth: null as any,
@@ -83,6 +89,62 @@ export const useAppStore = defineStore('app', {
   }),
 
   actions: {
+    async checkAuth() {
+      this.authChecking = true
+      this.authError = null
+      try {
+        const res = await fetch('/api/auth/me')
+        if (res.ok) {
+          const data = await res.json()
+          this.isAuthenticated = true
+          this.authUsername = data.usuario || ''
+          await this.fetchDocuments()
+        } else {
+          this.isAuthenticated = false
+          this.authUsername = ''
+        }
+      } catch (e) {
+        this.isAuthenticated = false
+      } finally {
+        this.authChecking = false
+      }
+    },
+
+    async login(username: string, password: string): Promise<boolean> {
+      this.authError = null
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password }),
+        })
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({ detail: 'Error al iniciar sesión' }))
+          this.authError = errData.detail || 'Credenciales incorrectas'
+          return false
+        }
+        const data = await res.json()
+        this.isAuthenticated = true
+        this.authUsername = data.usuario || username
+        await this.fetchDocuments()
+        return true
+      } catch (e: any) {
+        this.authError = e.message || 'Error de conexión con el servidor'
+        return false
+      }
+    },
+
+    async logout() {
+      try {
+        await fetch('/api/auth/logout', { method: 'POST' })
+      } catch (e) {
+        // ignore
+      } finally {
+        this.isAuthenticated = false
+        this.authUsername = ''
+      }
+    },
+
     async fetchHealth() {
       try {
         const res = await fetch('/api/health')

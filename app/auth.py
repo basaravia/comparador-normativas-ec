@@ -1,33 +1,29 @@
 """Módulo de autenticación simple para la aplicación Streamlit de Comparador de Normativas.
+
+La lógica de credenciales vive en `app/auth_core.py` y se comparte con la API FastAPI
+(`api/security.py`); aquí queda solo lo que depende de Streamlit.
 """
 from __future__ import annotations
 
-import hmac
-import os
 import streamlit as st
 
-DEFAULT_USERNAME = "asaravia002"
+from app.auth_core import (
+    DEFAULT_USERNAME,
+    credentials_are_configured,
+    get_configured_credentials,
+    is_auth_enabled,
+    verify_credentials,
+)
 
-
-def is_auth_enabled() -> bool:
-    """Indica si la autenticación está activa. Por defecto True."""
-    val = os.getenv("AUTH_ENABLED", "true").strip().lower()
-    return val not in ("false", "0", "no", "off", "disable", "disabled")
-
-
-def get_configured_credentials() -> tuple[str, str]:
-    """Retorna el usuario y contraseña configurados vía variables de entorno o defaults."""
-    user = os.getenv("AUTH_USERNAME", DEFAULT_USERNAME)
-    pwd = os.getenv("AUTH_PASSWORD", "")
-    return user, pwd
-
-
-def verify_credentials(username: str, password: str) -> bool:
-    """Verificación segura en tiempo constante de credenciales."""
-    expected_user, expected_pwd = get_configured_credentials()
-    user_match = hmac.compare_digest(username.encode("utf-8"), expected_user.encode("utf-8"))
-    pwd_match = hmac.compare_digest(password.encode("utf-8"), expected_pwd.encode("utf-8"))
-    return user_match and pwd_match
+__all__ = [
+    "DEFAULT_USERNAME",
+    "check_auth",
+    "credentials_are_configured",
+    "get_configured_credentials",
+    "is_auth_enabled",
+    "render_user_sidebar",
+    "verify_credentials",
+]
 
 
 def check_auth() -> bool:

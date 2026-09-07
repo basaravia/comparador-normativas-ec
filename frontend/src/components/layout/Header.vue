@@ -38,6 +38,7 @@
 
         <!-- Enlace a Postman -->
         <a
+          v-if="store.isAuthenticated"
           href="/api/postman.json"
           download="normativas_api.postman_collection.json"
           class="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-medium hover:bg-slate-800 transition shadow-sm"
@@ -46,6 +47,21 @@
           <Download class="w-4 h-4" />
           <span class="hidden sm:inline">Postman</span>
         </a>
+
+        <!-- Usuario autenticado y Salir -->
+        <div v-if="store.isAuthenticated" class="flex items-center space-x-2 pl-2 border-l border-border">
+          <span class="text-xs font-mono font-medium text-slate-700 hidden md:inline">
+            {{ store.authUsername }}
+          </span>
+          <button
+            @click="store.logout"
+            class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-rose-200 text-rose-700 hover:bg-rose-50 text-xs font-medium transition"
+            title="Cerrar sesión"
+          >
+            <LogOut class="w-3.5 h-3.5" />
+            <span class="hidden sm:inline">Salir</span>
+          </button>
+        </div>
       </div>
     </div>
   </header>
@@ -53,7 +69,7 @@
 
 <script setup lang="ts">
 import { onMounted } from 'vue'
-import { Scale, Cpu, BookOpen, Download } from 'lucide-vue-next'
+import { Scale, Cpu, BookOpen, Download, LogOut } from 'lucide-vue-next'
 import { useAppStore } from '@/stores/useAppStore'
 
 const store = useAppStore()

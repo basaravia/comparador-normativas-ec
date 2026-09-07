@@ -126,3 +126,29 @@ class RunStatusResponse(BaseModel):
     vista_normativa: List[Dict[str, Any]] = Field(default_factory=list)
     motivos_revision: List[str] = Field(default_factory=list)
     total_revision_manual: int = 0
+
+
+# ── Autenticación ─────────────────────────────────────────────────────────
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(..., description="Usuario autorizado (AUTH_USERNAME).")
+    password: str = Field(..., description="Contraseña asociada (AUTH_PASSWORD).")
+
+
+class LoginResponse(BaseModel):
+    ok: bool = True
+    usuario: str
+    expira_en: int = Field(..., description="Vigencia de la sesión en segundos.")
+
+
+class LogoutResponse(BaseModel):
+    ok: bool = True
+    mensaje: str = "Sesión cerrada."
+
+
+class SessionResponse(BaseModel):
+    autenticado: bool
+    usuario: str = ""
+    expira_en: Optional[int] = Field(None, description="Marca de tiempo Unix de expiración.")
+    auth_habilitada: bool = True

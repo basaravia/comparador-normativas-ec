@@ -9,12 +9,14 @@ import logging
 from pathlib import Path
 from typing import Any, Dict
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from api.routers import compare, documents, health, index, theme
+from api.routers import auth, compare, documents, health, index, theme
+from api.security import SesionRequerida, obtener_sesion, require_session
 
 logger = logging.getLogger("api")
 
@@ -23,6 +25,19 @@ API_DESCRIPTION = """
 
 Bienvenido a la API del **Pipeline de Análisis de Cumplimiento Normativo Bancario** (SBS, BCE, SEPS, UAF)
 frente a manuales internos de entidades financieras.
+
+## 🔐 Autenticación
+
+Toda la API (salvo `/api/health`, `/api/theme/tokens` y `/api/auth/*`) exige una **sesión activa**.
+
+1. `POST /api/auth/login` con `{"username": "...", "password": "..."}` emite la cookie firmada
+   `auth_session` (HttpOnly, `SameSite=Lax`), que el navegador reenvía sola en las llamadas
+   posteriores —incluidos el streaming SSE y el visor de PDF—.
+2. `GET /api/auth/me` valida la sesión vigente; `POST /api/auth/logout` la revoca.
+3. Las credenciales se configuran en `.env` con `AUTH_USERNAME` y `AUTH_PASSWORD`.
+
+`/docs`, `/redoc` y `/openapi.json` también quedan detrás de la sesión: sin ella, `/docs` y
+`/redoc` redirigen a la pantalla de acceso y `/openapi.json` responde 401.
 
 ## 🚀 Flujo de Trabajo Diario (Workflow en 4 Pasos)
 
@@ -52,9 +67,11 @@ app = FastAPI(
     title="Comparador de Normativas — API REST & SSE",
     version="4.0.0",
     description=API_DESCRIPTION,
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json",
+    # Sin rutas automáticas: `/docs`, `/redoc` y `/openapi.json` se registran más abajo
+    # envueltos en la verificación de sesión (ver `docs_*` / `openapi_protegido`).
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
 
 # CORS habilitado para clientes web, iPad y móviles
@@ -66,15 +83,57 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Inclusión de routers modulares
+# Inclusión de routers modulares.
+# Públicos: salud, tokens de diseño y el propio login (la SPA los necesita para
+# poder pintar la pantalla de acceso). El resto exige sesión válida.
 app.include_router(health.router)
-app.include_router(documents.router)
-app.include_router(index.router)
-app.include_router(compare.router)
 app.include_router(theme.router)
+app.include_router(auth.router)
+app.include_router(documents.router, dependencies=[SesionRequerida])
+app.include_router(index.router, dependencies=[SesionRequerida])
+app.include_router(compare.router, dependencies=[SesionRequerida])
 
 
-@app.get("/api/postman.json", tags=["Sistema y Proveedores"])
+# ── Documentación interactiva protegida ───────────────────────────────────
+# `/docs` y `/redoc` los abre una persona en el navegador: redirigir a la SPA
+# (que muestra el login) es más útil que un 401 en crudo. `/openapi.json` lo
+# consume Swagger UI y herramientas, así que ahí sí corresponde el 401.
+
+OPENAPI_URL = "/openapi.json"
+
+
+def _redirigir_a_login(request: Request, destino: str) -> RedirectResponse | None:
+    """None si hay sesión; si no, redirección a la SPA con el destino a retomar."""
+    if obtener_sesion(request) is not None:
+        return None
+    return RedirectResponse(url=f"/?next={destino}", status_code=302)
+
+
+@app.get("/docs", include_in_schema=False)
+def docs_swagger(request: Request):
+    """Swagger UI interactivo; requiere sesión activa."""
+    redireccion = _redirigir_a_login(request, "/docs")
+    if redireccion is not None:
+        return redireccion
+    return get_swagger_ui_html(openapi_url=OPENAPI_URL, title=f"{app.title} — Swagger UI")
+
+
+@app.get("/redoc", include_in_schema=False)
+def docs_redoc(request: Request):
+    """Documentación ReDoc; requiere sesión activa."""
+    redireccion = _redirigir_a_login(request, "/redoc")
+    if redireccion is not None:
+        return redireccion
+    return get_redoc_html(openapi_url=OPENAPI_URL, title=f"{app.title} — ReDoc")
+
+
+@app.get(OPENAPI_URL, include_in_schema=False)
+def openapi_protegido(_: dict = Depends(require_session)) -> Dict[str, Any]:
+    """Contrato OpenAPI 3.1; responde 401 sin sesión."""
+    return app.openapi()
+
+
+@app.get("/api/postman.json", tags=["Sistema y Proveedores"], dependencies=[SesionRequerida])
 def get_postman_collection(request: Request) -> Dict[str, Any]:
     """Genera y descarga la colección Postman v2.1 para importar directamente en Postman."""
     base_url = str(request.base_url).rstrip("/")

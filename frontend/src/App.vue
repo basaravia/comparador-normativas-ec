@@ -3,16 +3,28 @@
     <!-- Encabezado Principal -->
     <Header />
 
-    <!-- Barra de Pasos (Stepper) -->
-    <Stepper />
+    <!-- Estado de carga inicial de autenticación -->
+    <div v-if="store.authChecking" class="flex-1 flex flex-col items-center justify-center p-12 space-y-3">
+      <Loader2 class="w-8 h-8 text-primary animate-spin" />
+      <span class="text-xs text-content-muted">Verificando sesión segura...</span>
+    </div>
 
-    <!-- Área de Contenido Principal -->
-    <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
-      <Step1Documents v-if="store.currentStep === 1" />
-      <Step2Index v-else-if="store.currentStep === 2" />
-      <Step3Scope v-else-if="store.currentStep === 3" />
-      <Step4Results v-else-if="store.currentStep === 4" />
-    </main>
+    <!-- Pantalla de Login si no está autenticado -->
+    <LoginCard v-else-if="!store.isAuthenticated" />
+
+    <!-- Flujo completo de aplicación si está autenticado -->
+    <template v-else>
+      <!-- Barra de Pasos (Stepper) -->
+      <Stepper />
+
+      <!-- Área de Contenido Principal -->
+      <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+        <Step1Documents v-if="store.currentStep === 1" />
+        <Step2Index v-else-if="store.currentStep === 2" />
+        <Step3Scope v-else-if="store.currentStep === 3" />
+        <Step4Results v-else-if="store.currentStep === 4" />
+      </main>
+    </template>
 
     <!-- Modal de Visor de PDF (Pantalla Completa en Móvil / Gran Modal en Desktop e iPad) -->
     <div
@@ -56,8 +68,10 @@
 
 <script setup lang="ts">
 import { onMounted } from 'vue'
+import { Loader2 } from 'lucide-vue-next'
 import Header from '@/components/layout/Header.vue'
 import Stepper from '@/components/layout/Stepper.vue'
+import LoginCard from '@/components/layout/LoginCard.vue'
 import Step1Documents from '@/components/steps/Step1Documents.vue'
 import Step2Index from '@/components/steps/Step2Index.vue'
 import Step3Scope from '@/components/steps/Step3Scope.vue'
@@ -68,7 +82,8 @@ import { useAppStore } from '@/stores/useAppStore'
 
 const store = useAppStore()
 
-onMounted(() => {
-  store.fetchHealth()
+onMounted(async () => {
+  await store.fetchHealth()
+  await store.checkAuth()
 })
 </script>
