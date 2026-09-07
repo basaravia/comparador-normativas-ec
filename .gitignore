@@ -40,6 +40,7 @@ Informe_*.docx
 # Cualquier PLAN_*.md nuevo sigue ignorado por defecto — la excepción es
 # deliberada y por archivo, no una apertura del patrón.
 !PLAN_MEJORAS_ANEXO.md
+!PLAN_FASE2_MODERN_UI.md
 
 # Identidad visual del cliente: paleta real y logotipos NO se versionan.
 # Solo se versiona el placeholder genérico, que es el fallback de un clon limpio
