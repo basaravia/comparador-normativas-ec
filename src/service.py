@@ -295,16 +295,27 @@ def exportar(
     results_df: pd.DataFrame,
     rutas: RunPaths,
     indice: NormativaIndex | None = None,
+    bundle: Any | None = None,
+    run_scope: Any | None = None,
+    metadatos: dict[str, Any] | None = None,
 ) -> dict[str, Path]:
     """Fase 5 — entregables de la corrida en su propio directorio.
 
-    Devuelve las rutas escritas para que la interfaz ofrezca las descargas sin tener que
-    saber cómo se nombran.
+    Si se proporciona un `bundle` (corrida en doble vía), genera el Papel de Trabajo
+    completo de 6 hojas gobernado por `templates/papel_trabajo.yaml` (ítem 9).
+    Si no, genera el reporte en Excel tradicional conservando total compatibilidad.
     """
     rutas.crear()
     generados: dict[str, Path] = {}
 
-    generados["excel"] = DocumentComparator.export_excel(results_df, rutas.excel)
+    if bundle is not None:
+        from .papel_trabajo import generar_papel_trabajo
+        meta = metadatos or {"run_id": rutas.run_id, "workspace_id": rutas.workspace}
+        generados["excel"] = generar_papel_trabajo(
+            bundle, rutas.excel, run_scope=run_scope, metadatos=meta
+        )
+    else:
+        generados["excel"] = DocumentComparator.export_excel(results_df, rutas.excel)
 
     rutas.json.write_text(
         results_df.to_json(orient="records", force_ascii=False, indent=2),

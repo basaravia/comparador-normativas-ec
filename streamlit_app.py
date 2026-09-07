@@ -472,6 +472,7 @@ with tab_compare:
             try:
                 gestor().registrar(handle)
                 handle.estado = EstadoCorrida.CORRIENDO
+                bundle = None
                 if dual_mode:
                     manual_idx = service.construir_indice_manual(selected_manual_df, cfg)
                     bundle = service.comparar_dual(
@@ -504,7 +505,20 @@ with tab_compare:
                 st.session_state["run_scope"] = current_run_scope
                 st.session_state.pop("run_parcial", None)
 
-                generados = service.exportar(results_df, rutas)
+                generados = service.exportar(
+                    results_df,
+                    rutas,
+                    bundle=bundle if dual_mode else None,
+                    run_scope=current_run_scope,
+                    metadatos={
+                        "run_id": rutas.run_id,
+                        "workspace_id": "local",
+                        "llm_model": config.get("llm_model", ""),
+                        "embed_model": config.get("embed_model", ""),
+                        "min_semantic_score": config.get("min_semantic_score", 0.30),
+                        "faiss_top_k": config.get("faiss_top_k", 5),
+                    },
+                )
                 st.session_state["excel_bytes"] = generados["excel"].read_bytes()
                 st.session_state["excel_name"] = generados["excel"].name
                 st.session_state["json_bytes"] = generados["json"].read_bytes()
