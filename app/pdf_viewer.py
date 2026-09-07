@@ -17,7 +17,11 @@ from __future__ import annotations
 import io
 from pathlib import Path
 
-import pypdfium2 as pdfium
+try:
+    import pypdfium2 as pdfium
+except ImportError:
+    pdfium = None
+
 import streamlit as st
 
 DEFAULT_ZOOM = 1.5
@@ -59,6 +63,17 @@ def _render_pagina(ruta: str, mtime: float, pagina: int, zoom: float) -> bytes:
 
 def render_pdf_viewer(pdf_path: Path, key: str, pagina_defecto: int = 1) -> None:
     """Selector de página + zoom y la imagen de la página elegida de `pdf_path`."""
+    if pdfium is None:
+        st.warning(
+            "El módulo `pypdfium2` no está instalado en este entorno. "
+            "Instálalo con `pip install pypdfium2` para previsualizar páginas del PDF."
+        )
+        st.download_button(
+            "⬇️ Descargar PDF", data=pdf_path.read_bytes(),
+            file_name=pdf_path.name, mime="application/pdf", key=f"{key}_download_fallback",
+        )
+        return
+
     mtime = pdf_path.stat().st_mtime
     total = _num_paginas(str(pdf_path), mtime)
 
