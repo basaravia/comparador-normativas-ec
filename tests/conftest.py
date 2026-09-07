@@ -31,15 +31,13 @@ def _repo_root_cwd(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _clean_streamlit_session_state():
-    """Limpia st.session_state antes y después de cada prueba.
+def _clean_streamlit_session_state(monkeypatch: pytest.MonkeyPatch):
+    """Limpia st.session_state y desactiva auth solo durante AppTest.
 
-    st.session_state es un singleton de proceso fuera de un ScriptRunContext
-    real (funciona en "bare mode" con solo un warning) y AppTest crea su
-    propio contexto por script-run, pero los tests que llaman directamente a
-    funciones de app/logging_utils.py comparten el mismo estado si no se
-    limpia entre pruebas.
+    La autenticación queda activa por defecto en producción; las pruebas de UI
+    existentes validan el flujo interno y deben entrar directamente a las tabs.
     """
+    monkeypatch.setenv("AUTH_ENABLED", "false")
     import streamlit as st
 
     st.session_state.clear()

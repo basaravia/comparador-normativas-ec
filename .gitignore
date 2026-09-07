@@ -66,3 +66,6 @@ output/**/*.pdf
 # PDFs subidos desde la app Streamlit y logs de ejecución con estampa de tiempo
 output/uploads/
 output/logs/
+
+# Bitácora e infraestructura de red privada (NO versionar / NO publicar)
+infraestructura_red_bitacora/

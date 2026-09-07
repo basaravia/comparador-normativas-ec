@@ -25,6 +25,7 @@ import pandas as pd
 import streamlit as st
 
 from app.logging_utils import clear_log_lines, get_log_lines, save_run_log, setup_logging
+from app.auth import check_auth, render_user_sidebar
 from app.theme import NIVEL_COLORS, inject_theme, render_header
 from src import config as cfg
 from src import service
@@ -44,6 +45,14 @@ NIVEL_ORDER = ["cumple", "parcial", "omision", "no_aplica"]
 
 inject_theme()
 setup_logging()
+
+# La autenticación se evalúa antes de renderizar el resto de la aplicación.
+# En modo no autenticado, check_auth() muestra únicamente el formulario y
+# st.stop() evita cargar documentos, modelos y pestañas.
+if not check_auth():
+    st.stop()
+
+render_user_sidebar()
 render_header(
     "Análisis de cumplimiento normativo (SBS · BCE · SEPS · UAF) sobre manuales internos"
 )
