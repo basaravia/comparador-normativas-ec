@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -17,13 +17,11 @@ import pandas as pd
 import yaml
 
 from .design_tokens import (
-    FONDO,
     NIVEL_ORDEN,
     PRIMARIO,
     SUPERFICIE,
     TEXTO,
     hex_sin_almohadilla,
-    marca,
     tinte,
 )
 
@@ -119,7 +117,6 @@ def generar_papel_trabajo(
     font_bold = Font(name="Segoe UI", size=10, bold=True, color=color_texto)
     font_regular = Font(name="Segoe UI", size=9, color=color_texto)
     align_center = Alignment(horizontal="center", vertical="center")
-    align_left = Alignment(horizontal="left", vertical="center")
     border_thin = Border(
         left=Side(style="thin", color="E0E0E0"),
         right=Side(style="thin", color="E0E0E0"),

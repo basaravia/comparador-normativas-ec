@@ -7,16 +7,13 @@ from fastapi import APIRouter
 
 from src.design_tokens import (
     ACENTO,
-    CONTRASTE_MINIMO,
     ESTADO,
     FONDO,
-    NEUTROS,
     NIVEL_ORDEN,
     PRIMARIO,
     PRIMARIO_HOVER,
     SUPERFICIE,
     TEXTO,
-    TIPOGRAFIA,
     marca,
     tinte,
 )

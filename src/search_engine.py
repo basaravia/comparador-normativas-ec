@@ -30,7 +30,7 @@ from typing import Optional
 import pandas as pd
 
 # faiss se importa lazy (en build/load) para evitar conflicto de libs nativas con Docling
-from .chunking import como_articulo_padre, detectar_columna_padre
+from .chunking import detectar_columna_padre
 from .embeddings import EmbeddingBackend
 from .config import (
     FAISS_TOP_K,

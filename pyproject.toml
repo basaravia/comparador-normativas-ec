@@ -65,3 +65,4 @@ select = ["E4", "E7", "E9", "F"]
 # con el estilo del resto rompería la correspondencia visual con el notebook, que es
 # justo lo que los hace revisables.
 "validate_nb*.py" = ["F401", "E402", "E741"]
+"scripts/*.py" = ["E402"]

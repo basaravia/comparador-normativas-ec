@@ -5,12 +5,10 @@ dorado `tests/data/retrieval_gold_es.yaml` y produzca métricas válidas.
 """
 from __future__ import annotations
 
-import pandas as pd
 import pytest
 
 from scripts.eval_retrieval import (
     calcular_metricas,
-    cargar_dataset_oro,
     evaluar_configuracion,
 )
 from tests.fixtures import FakeEmbeddingBackend, normativa_df

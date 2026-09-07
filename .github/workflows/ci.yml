@@ -55,7 +55,8 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pytest pandas numpy tqdm openpyxl pydantic faiss-cpu \
-                      langchain langchain-core langchain-openai streamlit altair
+                      langchain langchain-core langchain-openai streamlit altair \
+                      fastapi uvicorn httpx python-multipart
 
       - name: Suite rápida
         run: pytest -q

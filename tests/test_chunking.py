@@ -12,13 +12,10 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from src import chunking
 from src.chunking import (
     chunk_articulo,
     chunk_normativa_df,
-    como_articulo_padre,
     detectar_columna_padre,
-    estimar_tokens,
 )
 from src.search_engine import NormativaIndex
 from tests.fixtures import FakeEmbeddingBackend

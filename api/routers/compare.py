@@ -5,10 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from pathlib import Path
-from typing import Any, AsyncGenerator, Dict, Optional
+from typing import Any, AsyncGenerator, Dict
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 
 from api.routers.documents import get_document_cache

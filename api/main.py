@@ -6,18 +6,16 @@ ReDoc en `/redoc`, especificación JSON en `/openapi.json` y colección Postman 
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 from typing import Any, Dict
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
-from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from api.routers import auth, compare, documents, health, index, theme
-from api.security import SesionRequerida, obtener_sesion, require_session
+from api.security import SesionRequerida, require_session
 
 logger = logging.getLogger("api")
 
