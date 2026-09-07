@@ -5,6 +5,19 @@ NormativaIndex:
   - semantic_search() → Top-K por similitud coseno (IndexFlatIP + L2-norm)
   - rerank()          → reordena candidatos con CrossEncoder local (optional)
   - lexical_scan()    → detecta referencias explícitas a artículos normativos
+
+Chunking parent-child (ítem 8)
+------------------------------
+`build()` acepta indistintamente el DataFrame de artículos de siempre o el DataFrame de
+sub-chunks que produce `chunking.chunk_normativa_df()`. La diferencia la detecta el propio
+índice por la presencia de una columna padre (`articulo_element_id` / `parent_element_id`):
+no hay bandera que pasar ni ruta que elegir desde fuera.
+
+Cuando hay sub-chunks se **busca sobre fragmentos y se devuelven artículos**: los aciertos
+se agrupan por artículo padre conservando el mejor score, de modo que la unidad de
+resultado siga siendo el artículo completo (Bloque A) y `top_k` siga significando "k
+artículos", no "k fragmentos". Sin esa agrupación, un artículo largo cuyos cinco numerales
+puntúan alto ocuparía él solo el top-5 y desplazaría a los demás artículos aplicables.
 """
 from __future__ import annotations
 
@@ -17,6 +30,7 @@ from typing import Optional
 import pandas as pd
 
 # faiss se importa lazy (en build/load) para evitar conflicto de libs nativas con Docling
+from .chunking import como_articulo_padre, detectar_columna_padre
 from .embeddings import EmbeddingBackend
 from .config import (
     FAISS_TOP_K,
@@ -69,6 +83,11 @@ class NormativaIndex:
         self._df: Optional[pd.DataFrame] = None
         self._vector_store_spec = vector_store_spec
 
+        # Chunking parent-child: None mientras el índice contenga artículos enteros.
+        # Lo fija `_registrar_df()` a partir de las columnas, en build() y en load().
+        self._col_padre: Optional[str] = None
+        self._max_chunks_por_padre = 1
+
         # El reranker se construye **cuando se usa**, no aquí.
         #
         # Antes este constructor importaba torch y sentence-transformers y descargaba
@@ -105,8 +124,31 @@ class NormativaIndex:
         spec = self._vector_store_spec or ProviderSpec(proveedor=Provider.FAISS_LOCAL)
         self._index = build_vector_store(spec, dim)
         self._index.add(vecs)
-        self._df = normativa_df.reset_index(drop=True)
+        self._registrar_df(normativa_df)
         logger.info("Índice listo: %d vectores, dim=%d", self._index.ntotal, dim)
+
+    def _registrar_df(self, df: pd.DataFrame) -> None:
+        """Guarda el DataFrame y deduce si lo indexado son sub-chunks o artículos.
+
+        `_max_chunks_por_padre` es lo que hace exacta la agrupación de `semantic_search`:
+        pedirle a FAISS `top_k * max_chunks` vecinos garantiza que, en el peor caso —los
+        primeros aciertos son todos fragmentos del mismo artículo—, queden `top_k`
+        artículos distintos. Un factor fijo (×4, ×10) no lo garantiza y devolvería menos
+        resultados de los pedidos justo con los artículos más subdivididos.
+        """
+        self._df = df.reset_index(drop=True)
+        self._col_padre = detectar_columna_padre(self._df)
+        if self._col_padre is None:
+            self._max_chunks_por_padre = 1
+            return
+
+        self._max_chunks_por_padre = max(1, int(self._df.groupby(self._col_padre).size().max()))
+        logger.info(
+            "Índice con chunking parent-child: %d sub-chunks sobre %d artículos "
+            "(hasta %d por artículo); los resultados se agrupan por '%s'.",
+            len(self._df), self._df[self._col_padre].nunique(),
+            self._max_chunks_por_padre, self._col_padre,
+        )
 
     def _firma_backend(self) -> dict:
         """Con qué se construyó este índice. Es lo que permite rechazar una carga inválida."""
