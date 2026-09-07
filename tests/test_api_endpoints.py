@@ -50,6 +50,12 @@ class TestHealthAndProviders:
         assert "item" in data
         assert len(data["item"]) > 5
 
+    def test_root_serves_spa_html(self):
+        response = client.get("/")
+        assert response.status_code == 200
+        assert "text/html" in response.headers["content-type"]
+        assert "Comparador de Normativas" in response.text
+
 
 class TestDocumentEndpoints:
 

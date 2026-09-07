@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Design System Paramétrico — Genérico Azul y Blanco */
+  --color-primary: #1e40af;       /* Azul base institucional */
+  --color-primary-hover: #1d4ed8; /* Azul interactivo hover */
+  --color-primary-light: #eff6ff; /* Azul muy suave (fondos seleccionados) */
+  --color-accent: #3b82f6;        /* Azul de acento */
+  --color-surface: #ffffff;       /* Blanco puro */
+  --color-background: #f8fafc;    /* Fondo pizarra claro */
+  --color-border: #e2e8f0;        /* Borde neutro */
+
+  /* Textos neutros accesibles */
+  --color-text-main: #0f172a;     /* Pizarra oscura */
+  --color-text-muted: #64748b;    /* Gris atenuado */
+
+  /* Estados de cumplimiento según tokens normativos */
+  --color-state-cumple-bg: #dcf0e0;
+  --color-state-cumple-fg: #15803d;
+  --color-state-parcial-bg: #fff2cc;
+  --color-state-parcial-fg: #b45309;
+  --color-state-omision-bg: #fce8e6;
+  --color-state-omision-fg: #b91c1c;
+  --color-state-no-aplica-bg: #f3f4f6;
+  --color-state-no-aplica-fg: #737373;
+}
+
+/* Scrollbar estilizado y suave */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Ajustes táctiles para iPad y móviles */
+@media (pointer: coarse) {
+  button, input, select {
+    min-height: 44px;
+  }
+}

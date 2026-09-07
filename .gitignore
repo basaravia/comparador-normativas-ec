@@ -69,5 +69,8 @@ output/uploads/
 output/logs/
 output/eval/
 
+# Node / Frontend dependencies
+frontend/node_modules/
+
 # Bitácora e infraestructura de red privada (NO versionar / NO publicar)
 infraestructura_red_bitacora/
