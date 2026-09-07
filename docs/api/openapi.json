@@ -1,0 +1,1160 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Comparador de Normativas — API REST & SSE",
+    "description": "\n# 📑 Comparador Automatizado de Normativas vs Manuales Internos — API REST\n\nBienvenido a la API del **Pipeline de Análisis de Cumplimiento Normativo Bancario** (SBS, BCE, SEPS, UAF)\nfrente a manuales internos de entidades financieras.\n\n## 🚀 Flujo de Trabajo Diario (Workflow en 4 Pasos)\n\n1. **Documentos (`/api/documents`)**:\n   - Subir o consultar normativas y manuales en PDF.\n   - Tabular con Docling mediante `POST /api/documents/tabular`.\n   - Visualizar PDFs en alta fidelidad y streaming con `GET /api/documents/{tipo}/{doc_id}/pdf`.\n2. **Índice Semántico (`/api/index`)**:\n   - Construir el índice FAISS vectorial con chunking semántico parent-child (`POST /api/index/build`).\n   - Probar similitud y reranking con `POST /api/index/search`.\n3. **Comparación y Alcance (`/api/compare`)**:\n   - Configurar el alcance con `RunScope` y lanzar análisis en doble vía (`POST /api/compare/start`).\n   - Monitorear el progreso en tiempo real mediante Server-Sent Events (SSE) en `GET /api/compare/stream/{run_id}`.\n4. **Resultados y Entregables (`/api/compare/runs`)**:\n   - Consultar la Cobertura Global, hallazgos, alertas y motivos de revisión manual (`GET /api/compare/runs/{run_id}`).\n   - Descargar el **Papel de Trabajo de Auditoría en Excel** de 6 hojas (`GET /api/compare/runs/{run_id}/export/excel`).\n\n## 🛠️ Herramientas de Integración\n\n- **Swagger UI Interactivo**: Pruebe cada endpoint directamente desde el navegador en [`/docs`](/docs).\n- **ReDoc Documentación**: Visualización de especificación completa en [`/redoc`](/redoc).\n- **Contrato OpenAPI 3.1**: Descargue el esquema estándar en [`/openapi.json`](/openapi.json) para importar en Swagger Editor.\n- **Colección Postman**: Descargue la colección lista para usar en [`/api/postman.json`](/api/postman.json).\n",
+    "version": "4.0.0"
+  },
+  "paths": {
+    "/api/health": {
+      "get": {
+        "tags": [
+          "Sistema y Proveedores"
+        ],
+        "summary": "Get Health",
+        "description": "Verifica la operatividad del servicio y plataforma.",
+        "operationId": "get_health_api_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/config/providers": {
+      "get": {
+        "tags": [
+          "Sistema y Proveedores"
+        ],
+        "summary": "Get Providers",
+        "description": "Retorna los proveedores disponibles con aceleración GPU local y remota.",
+        "operationId": "get_providers_api_config_providers_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvidersResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/documents": {
+      "get": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "List Documents",
+        "description": "Lista todos los PDFs disponibles en las carpetas base y de subidas.",
+        "operationId": "list_documents_api_documents_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentsListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/documents/{tipo}/{doc_id}/pdf": {
+      "get": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "Get Document Pdf",
+        "description": "Entrega el archivo PDF binario para renderizado en PDF.js con soporte de byte-ranges.",
+        "operationId": "get_document_pdf_api_documents__tipo___doc_id__pdf_get",
+        "parameters": [
+          {
+            "name": "tipo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Tipo"
+            }
+          },
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Doc Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/documents/upload": {
+      "post": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "Upload Document",
+        "description": "Sube un documento PDF al almacenamiento de uploads.",
+        "operationId": "upload_document_api_documents_upload_post",
+        "parameters": [
+          {
+            "name": "tipo",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Tipo"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_document_api_documents_upload_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/documents/tabular": {
+      "post": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "Tabulate Documents",
+        "description": "Ejecuta la tabulación de documentos mediante Docling.",
+        "operationId": "tabulate_documents_api_documents_tabular_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TabulateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TabulateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/index/build": {
+      "post": {
+        "tags": [
+          "Índice Semántico"
+        ],
+        "summary": "Build Index",
+        "description": "Construye el índice semántico FAISS con o sin sub-chunking parent-child.",
+        "operationId": "build_index_api_index_build_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IndexBuildRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IndexBuildResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/index/search": {
+      "post": {
+        "tags": [
+          "Índice Semántico"
+        ],
+        "summary": "Search Index",
+        "description": "Ejecuta una búsqueda semántica de prueba.",
+        "operationId": "search_index_api_index_search_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchQueryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchQueryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/compare/start": {
+      "post": {
+        "tags": [
+          "Comparación"
+        ],
+        "summary": "Start Compare",
+        "description": "Inicia una corrida de comparación asíncrona.",
+        "operationId": "start_compare_api_compare_start_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartCompareRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartCompareResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/compare/stream/{run_id}": {
+      "get": {
+        "tags": [
+          "Comparación"
+        ],
+        "summary": "Stream Progress",
+        "description": "Canal Server-Sent Events (SSE) para recibir el progreso en vivo.",
+        "operationId": "stream_progress_api_compare_stream__run_id__get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/compare/runs/{run_id}": {
+      "get": {
+        "tags": [
+          "Comparación"
+        ],
+        "summary": "Get Run Status",
+        "description": "Retorna el estado detallado y resultados de una corrida.",
+        "operationId": "get_run_status_api_compare_runs__run_id__get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/compare/runs/{run_id}/export/{formato}": {
+      "get": {
+        "tags": [
+          "Comparación"
+        ],
+        "summary": "Export Run",
+        "description": "Descarga el Papel de Trabajo en Excel (6 hojas) o archivo JSON.",
+        "operationId": "export_run_api_compare_runs__run_id__export__formato__get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "formato",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Formato"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/theme/tokens": {
+      "get": {
+        "tags": [
+          "Diseño y Tokens"
+        ],
+        "summary": "Get Theme Tokens",
+        "description": "Retorna los tokens de diseño y las variables CSS para estilizar la aplicación.",
+        "operationId": "get_theme_tokens_api_theme_tokens_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Theme Tokens Api Theme Tokens Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/postman.json": {
+      "get": {
+        "tags": [
+          "Sistema y Proveedores"
+        ],
+        "summary": "Get Postman Collection",
+        "description": "Genera y descarga la colección Postman v2.1 para importar directamente en Postman.",
+        "operationId": "get_postman_collection_api_postman_json_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Postman Collection Api Postman Json Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Body_upload_document_api_documents_upload_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_document_api_documents_upload_post"
+      },
+      "DocumentItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "nombre": {
+            "type": "string",
+            "title": "Nombre"
+          },
+          "tipo": {
+            "type": "string",
+            "title": "Tipo"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes"
+          },
+          "elementos_parseados": {
+            "type": "integer",
+            "title": "Elementos Parseados",
+            "default": 0
+          },
+          "tiene_pdf": {
+            "type": "boolean",
+            "title": "Tiene Pdf",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "nombre",
+          "tipo",
+          "size_bytes"
+        ],
+        "title": "DocumentItem"
+      },
+      "DocumentsListResponse": {
+        "properties": {
+          "normativas": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentItem"
+            },
+            "type": "array",
+            "title": "Normativas"
+          },
+          "manuales": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentItem"
+            },
+            "type": "array",
+            "title": "Manuales"
+          }
+        },
+        "type": "object",
+        "required": [
+          "normativas",
+          "manuales"
+        ],
+        "title": "DocumentsListResponse"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "ok"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "default": "4.0.0"
+          },
+          "device": {
+            "type": "string",
+            "title": "Device",
+            "default": "cpu"
+          },
+          "platform": {
+            "type": "string",
+            "title": "Platform",
+            "default": "linux"
+          }
+        },
+        "type": "object",
+        "title": "HealthResponse"
+      },
+      "IndexBuildRequest": {
+        "properties": {
+          "use_chunking": {
+            "type": "boolean",
+            "title": "Use Chunking",
+            "default": true
+          },
+          "max_tokens": {
+            "type": "integer",
+            "title": "Max Tokens",
+            "default": 512
+          },
+          "solape": {
+            "type": "integer",
+            "title": "Solape",
+            "default": 50
+          }
+        },
+        "type": "object",
+        "title": "IndexBuildRequest"
+      },
+      "IndexBuildResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "total_vectores": {
+            "type": "integer",
+            "title": "Total Vectores"
+          },
+          "usar_chunking": {
+            "type": "boolean",
+            "title": "Usar Chunking"
+          },
+          "elapsed_seconds": {
+            "type": "number",
+            "title": "Elapsed Seconds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "total_vectores",
+          "usar_chunking",
+          "elapsed_seconds"
+        ],
+        "title": "IndexBuildResponse"
+      },
+      "ProviderInfo": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "nombre": {
+            "type": "string",
+            "title": "Nombre"
+          },
+          "disponible": {
+            "type": "boolean",
+            "title": "Disponible"
+          },
+          "tipo": {
+            "type": "string",
+            "title": "Tipo"
+          },
+          "detalles": {
+            "type": "string",
+            "title": "Detalles",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "nombre",
+          "disponible",
+          "tipo"
+        ],
+        "title": "ProviderInfo"
+      },
+      "ProvidersResponse": {
+        "properties": {
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderInfo"
+            },
+            "type": "array",
+            "title": "Providers"
+          },
+          "default_llm": {
+            "type": "string",
+            "title": "Default Llm"
+          },
+          "default_embed": {
+            "type": "string",
+            "title": "Default Embed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "providers",
+          "default_llm",
+          "default_embed"
+        ],
+        "title": "ProvidersResponse"
+      },
+      "RunScopeModel": {
+        "properties": {
+          "articulos": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Articulos"
+          },
+          "secciones": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Secciones"
+          },
+          "doc_ids_normativa": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Doc Ids Normativa"
+          },
+          "preset_articulos": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preset Articulos"
+          },
+          "muestra_n": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Muestra N"
+          },
+          "muestra_aleatoria": {
+            "type": "boolean",
+            "title": "Muestra Aleatoria",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "RunScopeModel"
+      },
+      "RunStatusResponse": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "estado": {
+            "type": "string",
+            "title": "Estado"
+          },
+          "progreso": {
+            "type": "integer",
+            "title": "Progreso"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "porcentaje": {
+            "type": "number",
+            "title": "Porcentaje"
+          },
+          "etiqueta": {
+            "type": "string",
+            "title": "Etiqueta",
+            "default": ""
+          },
+          "cobertura_global": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cobertura Global"
+          },
+          "alerta_cobertura": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alerta Cobertura"
+          },
+          "articulos_sin_cobertura": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Articulos Sin Cobertura"
+          },
+          "vista_manual": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Vista Manual"
+          },
+          "vista_normativa": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Vista Normativa"
+          },
+          "motivos_revision": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Motivos Revision"
+          },
+          "total_revision_manual": {
+            "type": "integer",
+            "title": "Total Revision Manual",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "estado",
+          "progreso",
+          "total",
+          "porcentaje"
+        ],
+        "title": "RunStatusResponse"
+      },
+      "SearchQueryRequest": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "top_k": {
+            "type": "integer",
+            "title": "Top K",
+            "default": 5
+          },
+          "min_score": {
+            "type": "number",
+            "title": "Min Score",
+            "default": 0.3
+          },
+          "use_reranker": {
+            "type": "boolean",
+            "title": "Use Reranker",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "title": "SearchQueryRequest"
+      },
+      "SearchQueryResponse": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/SearchResultItem"
+            },
+            "type": "array",
+            "title": "Results"
+          }
+        },
+        "type": "object",
+        "required": [
+          "query",
+          "results"
+        ],
+        "title": "SearchQueryResponse"
+      },
+      "SearchResultItem": {
+        "properties": {
+          "element_id": {
+            "type": "string",
+            "title": "Element Id"
+          },
+          "numero": {
+            "type": "string",
+            "title": "Numero"
+          },
+          "encabezado": {
+            "type": "string",
+            "title": "Encabezado"
+          },
+          "contenido": {
+            "type": "string",
+            "title": "Contenido"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          },
+          "doc_id": {
+            "type": "string",
+            "title": "Doc Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "element_id",
+          "numero",
+          "encabezado",
+          "contenido",
+          "score",
+          "doc_id"
+        ],
+        "title": "SearchResultItem"
+      },
+      "StartCompareRequest": {
+        "properties": {
+          "dual_mode": {
+            "type": "boolean",
+            "title": "Dual Mode",
+            "default": true
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunScopeModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "min_score": {
+            "type": "number",
+            "title": "Min Score",
+            "default": 0.3
+          },
+          "top_k": {
+            "type": "integer",
+            "title": "Top K",
+            "default": 5
+          },
+          "llm_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Model"
+          },
+          "embed_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Embed Model"
+          }
+        },
+        "type": "object",
+        "title": "StartCompareRequest"
+      },
+      "StartCompareResponse": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "stream_url": {
+            "type": "string",
+            "title": "Stream Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "status",
+          "stream_url"
+        ],
+        "title": "StartCompareResponse"
+      },
+      "TabulateRequest": {
+        "properties": {
+          "normativas": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Normativas"
+          },
+          "manuales": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Manuales"
+          },
+          "do_ocr": {
+            "type": "boolean",
+            "title": "Do Ocr",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "TabulateRequest"
+      },
+      "TabulateResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "normativa_elementos": {
+            "type": "integer",
+            "title": "Normativa Elementos"
+          },
+          "manual_secciones": {
+            "type": "integer",
+            "title": "Manual Secciones"
+          },
+          "elapsed_seconds": {
+            "type": "number",
+            "title": "Elapsed Seconds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "normativa_elementos",
+          "manual_secciones",
+          "elapsed_seconds"
+        ],
+        "title": "TabulateResponse"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

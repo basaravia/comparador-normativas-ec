@@ -1,0 +1,413 @@
+{
+  "info": {
+    "name": "Comparador de Normativas vs Manuales API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Colección Postman para pruebas de endpoints REST y SSE del Comparador de Normativas.",
+    "version": "4.0.0"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "[Sistema y Proveedores] Get Health",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/health",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "health"
+          ]
+        },
+        "description": "Verifica la operatividad del servicio y plataforma."
+      }
+    },
+    {
+      "name": "[Sistema y Proveedores] Get Providers",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/config/providers",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "config",
+            "providers"
+          ]
+        },
+        "description": "Retorna los proveedores disponibles con aceleración GPU local y remota."
+      }
+    },
+    {
+      "name": "[Documentos] List Documents",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/documents",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "documents"
+          ]
+        },
+        "description": "Lista todos los PDFs disponibles en las carpetas base y de subidas."
+      }
+    },
+    {
+      "name": "[Documentos] Get Document Pdf",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/documents/{tipo}/{doc_id}/pdf",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "documents",
+            "{tipo}",
+            "{doc_id}",
+            "pdf"
+          ]
+        },
+        "description": "Entrega el archivo PDF binario para renderizado en PDF.js con soporte de byte-ranges."
+      }
+    },
+    {
+      "name": "[Documentos] Upload Document",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/documents/upload",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "documents",
+            "upload"
+          ]
+        },
+        "description": "Sube un documento PDF al almacenamiento de uploads."
+      }
+    },
+    {
+      "name": "[Documentos] Tabulate Documents",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/documents/tabular",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "documents",
+            "tabular"
+          ]
+        },
+        "description": "Ejecuta la tabulación de documentos mediante Docling."
+      }
+    },
+    {
+      "name": "[Índice Semántico] Build Index",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/index/build",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "index",
+            "build"
+          ]
+        },
+        "description": "Construye el índice semántico FAISS con o sin sub-chunking parent-child."
+      }
+    },
+    {
+      "name": "[Índice Semántico] Search Index",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/index/search",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "index",
+            "search"
+          ]
+        },
+        "description": "Ejecuta una búsqueda semántica de prueba."
+      }
+    },
+    {
+      "name": "[Comparación] Start Compare",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/compare/start",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "compare",
+            "start"
+          ]
+        },
+        "description": "Inicia una corrida de comparación asíncrona."
+      }
+    },
+    {
+      "name": "[Comparación] Stream Progress",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/compare/stream/{run_id}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "compare",
+            "stream",
+            "{run_id}"
+          ]
+        },
+        "description": "Canal Server-Sent Events (SSE) para recibir el progreso en vivo."
+      }
+    },
+    {
+      "name": "[Comparación] Get Run Status",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/compare/runs/{run_id}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "compare",
+            "runs",
+            "{run_id}"
+          ]
+        },
+        "description": "Retorna el estado detallado y resultados de una corrida."
+      }
+    },
+    {
+      "name": "[Comparación] Export Run",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/compare/runs/{run_id}/export/{formato}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "compare",
+            "runs",
+            "{run_id}",
+            "export",
+            "{formato}"
+          ]
+        },
+        "description": "Descarga el Papel de Trabajo en Excel (6 hojas) o archivo JSON."
+      }
+    },
+    {
+      "name": "[Diseño y Tokens] Get Theme Tokens",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/theme/tokens",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "theme",
+            "tokens"
+          ]
+        },
+        "description": "Retorna los tokens de diseño y las variables CSS para estilizar la aplicación."
+      }
+    },
+    {
+      "name": "[Sistema y Proveedores] Get Postman Collection",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/postman.json",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "postman.json"
+          ]
+        },
+        "description": "Genera y descarga la colección Postman v2.1 para importar directamente en Postman."
+      }
+    }
+  ]
+}
