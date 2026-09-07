@@ -1,0 +1,62 @@
+version: 1
+descripcion: "Dataset de evaluación de retrieval en español para normativas bancarias (SBS, BCE, SEPS, UAF)"
+consultas:
+  - id: "q01"
+    consulta: "política de crédito y evaluación de capacidad de pago del deudor"
+    articulos_esperados:
+      - doc_id: "LEY-A-2026.pdf"
+        numero: "1"
+      - doc_id: "LEY-A-2026.pdf"
+        numero: "2"
+    tema: "riesgo_crediticio"
+
+  - id: "q02"
+    consulta: "prevención de lavado de activos y reporte de operaciones sospechosas"
+    articulos_esperados:
+      - doc_id: "RES-B-2026.pdf"
+        numero: "1"
+      - doc_id: "RES-B-2026.pdf"
+        numero: "2"
+    tema: "antilavado"
+
+  - id: "q03"
+    consulta: "custodia y conservación de expedientes de clientes y archivo digital"
+    articulos_esperados:
+      - doc_id: "LEY-A-2026.pdf"
+        numero: "8"
+    tema: "operaciones"
+
+  - id: "q04"
+    consulta: "criterios de constitución de provisiones para cartera incobrable"
+    articulos_esperados:
+      - doc_id: "LEY-A-2026.pdf"
+        numero: "35"
+    tema: "provisiones"
+
+  - id: "q05"
+    consulta: "obligaciones del oficial de cumplimiento y auditoría interna"
+    articulos_esperados:
+      - doc_id: "RES-B-2026.pdf"
+        numero: "4"
+    tema: "gobierno_corporativo"
+
+  - id: "q06"
+    consulta: "conocimiento del cliente y debida diligencia ampliada"
+    articulos_esperados:
+      - doc_id: "RES-B-2026.pdf"
+        numero: "3"
+    tema: "debida_diligencia"
+
+  - id: "q07"
+    consulta: "monitoreo transaccional continuo y señales de alerta financieras"
+    articulos_esperados:
+      - doc_id: "RES-B-2026.pdf"
+        numero: "2"
+    tema: "monitoreo"
+
+  - id: "q08"
+    consulta: "garantías crediticias y límites de concentración de cartera"
+    articulos_esperados:
+      - doc_id: "LEY-A-2026.pdf"
+        numero: "12"
+    tema: "riesgo_crediticio"
