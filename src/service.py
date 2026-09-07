@@ -318,3 +318,50 @@ def exportar(
 
     logger.info("Corrida %s exportada en %s", rutas.run_id, rutas.directorio)
     return generados
+
+
+def construir_indice_manual(
+    manual_df: pd.DataFrame,
+    config: ServiceConfig,
+) -> NormativaIndex:
+    """Construye el índice semántico sobre las secciones del manual (para Vía 2)."""
+    backend = construir_backend_embeddings(config)
+    from .search_engine import NormativaIndex
+    indice = NormativaIndex(
+        backend,
+        use_reranker=config.use_reranker,
+        reranker_model=config.reranker_model,
+        vector_store_spec=config.vector_store_spec,
+    )
+    col = "embed_text" if "embed_text" in manual_df.columns else "texto"
+    indice.build(manual_df, text_col=col)
+    return indice
+
+
+def comparar_dual(
+    indice_normativa: NormativaIndex,
+    indice_manual: Any,
+    manual_df: pd.DataFrame,
+    normativa_df: pd.DataFrame,
+    config: ServiceConfig,
+    *,
+    workspace_id: str = "local",
+    min_score: float = 0.30,
+    top_k: int = 5,
+    incluir_referencias: bool = False,
+    progress_callback: Optional[Callable[[str, int, int], None]] = None,
+):
+    """Orquesta el análisis en doble vía (Vía 1 + Vía 2) del ítem 6."""
+    from .dual import run_dual
+    comparador = construir_comparador(indice_normativa, config)
+    return run_dual(
+        comparador=comparador,
+        manual_index=indice_manual,
+        manual_df=manual_df,
+        normativa_df=normativa_df,
+        workspace_id=workspace_id,
+        top_k=top_k,
+        min_score=min_score,
+        incluir_referencias=incluir_referencias,
+        progress_callback=progress_callback,
+    )

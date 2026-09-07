@@ -28,7 +28,7 @@ from app.logging_utils import clear_log_lines, get_log_lines, save_run_log, setu
 from app.auth import check_auth, render_user_sidebar
 from app.theme import NIVEL_COLORS, inject_theme, render_header
 from src import config as cfg
-from src import service
+from src import scope, service
 from app.run_manager import EstadoCorrida, RunHandle, gestor
 from src.errors import RunAbortedError
 from src.model_registry import modelos_disponibles, preflight
@@ -329,19 +329,77 @@ with tab_compare:
             st.warning("DMR no responde en la URL configurada; la comparación fallará al llamar al LLM.")
 
         manual_df = st.session_state["manual_df"]
-        mode = st.radio("Modo de ejecución", ["Muestra rápida", "Pipeline completo"], horizontal=True, key="cfg_run_mode")
-        n_sample = None
-        if mode == "Muestra rápida":
-            n_sample = st.number_input(
-                "Número de secciones a analizar", min_value=1, max_value=len(manual_df),
-                value=min(5, len(manual_df)), key="cfg_sample_n",
+        normativa_df = st.session_state["normativa_df"]
+
+        st.markdown("#### 🎯 Selector de alcance (Ítem 7)")
+        col_alcance_norm, col_alcance_man = st.columns(2)
+        with col_alcance_norm:
+            st.markdown("**Alcance normativo**")
+            docs_norm_disp = sorted(normativa_df["doc_id"].dropna().unique().tolist()) if "doc_id" in normativa_df.columns else []
+            sel_docs_norm = st.multiselect("Documentos normativos", docs_norm_disp, default=docs_norm_disp, key="scope_docs_norm")
+            preset_art = st.selectbox(
+                "Preset de artículos",
+                ["Todo el articulado", "Excluir referencias", "Solo disposiciones"],
+                key="scope_preset_norm",
             )
+            busqueda_art = st.text_input("Filtrar por número / texto (opcional)", key="scope_busqueda_art")
+
+        with col_alcance_man:
+            st.markdown("**Alcance del manual**")
+            modo_manual = st.radio(
+                "Selección de secciones",
+                ["Muestra rápida", "Todo el manual", "Filtro por jerarquía"],
+                horizontal=True,
+                key="scope_modo_manual",
+            )
+            n_sample = 5
+            filtro_jerarquia = ""
+            if modo_manual == "Muestra rápida":
+                n_sample = st.number_input(
+                    "Número de secciones a analizar", min_value=1, max_value=len(manual_df),
+                    value=min(5, len(manual_df)), key="cfg_sample_n",
+                )
+            elif modo_manual == "Filtro por jerarquía":
+                filtro_jerarquia = st.text_input("Texto de jerarquía (ej. 4.1 o Crédito)", key="scope_jerarquia_txt")
+
+        tipos_elem = ["disposicion"] if preset_art == "Solo disposiciones" else (["articulo"] if preset_art != "Todo el articulado" else ())
+        selected_normativa_df = scope.filtrar_articulos(
+            normativa_df,
+            doc_ids=sel_docs_norm if sel_docs_norm else None,
+            secciones=[busqueda_art] if busqueda_art else None,
+            incluir_referencias=(preset_art == "Todo el articulado"),
+            tipos_elemento=tipos_elem,
+        )
+
+        if modo_manual == "Muestra rápida":
+            selected_manual_df = scope.muestra_rapida(manual_df, int(n_sample))
+            mode = "Muestra rápida"
+        elif modo_manual == "Filtro por jerarquía" and filtro_jerarquia:
+            selected_manual_df = scope.filtrar_secciones(manual_df, jerarquias=[filtro_jerarquia])
+            mode = f"Filtro ({filtro_jerarquia})"
         else:
-            st.warning(
-                f"⚠️ El pipeline completo procesa las {len(manual_df)} secciones del manual. "
-                "En hardware M1 16GB cada sección puede tardar ~2–4 min (razonamiento CoT del LLM) — "
-                "puede tomar varias horas."
-            )
+            selected_manual_df = manual_df
+            mode = "Pipeline completo"
+
+        current_run_scope = scope.RunScope.desde_dataframes(
+            selected_normativa_df,
+            selected_manual_df,
+            doc_ids_normativa=sel_docs_norm,
+            incluir_referencias=(preset_art == "Todo el articulado"),
+            preset_articulos=preset_art,
+            muestra_n=int(n_sample) if modo_manual == "Muestra rápida" else None,
+        )
+
+        st.info(
+            f"📌 **Alcance configurado:** {len(selected_normativa_df)} artículos/elementos normativos × "
+            f"{len(selected_manual_df)} secciones de manual"
+        )
+
+        dual_mode = st.checkbox(
+            "🔄 **Análisis en doble vía (Ítem 6)** — Vía 1 (manual → norma) + Vía 2 (norma → manual) y cobertura global",
+            value=True,
+            key="cfg_dual_mode",
+        )
 
         # Preflight: valida modelo LLM y de embeddings CONTRA LA LISTA REAL antes de
         # dejar arrancar. Sin esto, un modelo mal escrito se descubría a mitad de una
@@ -394,25 +452,15 @@ with tab_compare:
 
         if run_clicked:
             clear_log_lines()
-            selected_manual_df = (
-                manual_df.sample(int(n_sample), random_state=42) if mode == "Muestra rápida" else manual_df
-            )
             total = len(selected_manual_df)
 
             cfg = service.ServiceConfig.desde_dict(config)
-            # Cada corrida escribe en su propio directorio (§3.3.2): antes todo iba a
-            # una ruta fija y dos corridas se pisaban el reporte, sin forma de saber
-            # cuál produjo cuál.
             rutas = service.RunPaths(run_id=service.nuevo_run_id())
-            # session_state guarda SOLO el run_id. Todo lo demás se re-adjunta desde el
-            # gestor de proceso, que es lo que sobrevive a un refresco del navegador.
             st.session_state["run_id"] = rutas.run_id
             handle = RunHandle(run_id=rutas.run_id, total=total, config_hash=cfg_hash)
 
             def _on_progress(done: int, total_: int, row: dict) -> None:
                 label = str(row.get("jerarquia") or row.get("titulo_seccion") or "")[:60]
-                # Al handle primero: es lo que sobrevive a un refresco. Los widgets son
-                # de esta sesión y desaparecen con ella.
                 handle.progreso = done
                 handle.etiqueta_actual = f"{done}/{total_} · {label}"
                 gestor()._espejar(handle)
@@ -424,20 +472,36 @@ with tab_compare:
             try:
                 gestor().registrar(handle)
                 handle.estado = EstadoCorrida.CORRIENDO
-                results_df = service.comparar(
-                    st.session_state["normativa_index"],
-                    selected_manual_df,
-                    st.session_state["normativa_df"],
-                    cfg,
-                    progress_callback=_on_progress,
-                    desc=mode,
-                    cancelar=handle.cancelar,
-                )
+                if dual_mode:
+                    manual_idx = service.construir_indice_manual(selected_manual_df, cfg)
+                    bundle = service.comparar_dual(
+                        indice_normativa=st.session_state["normativa_index"],
+                        indice_manual=manual_idx,
+                        manual_df=selected_manual_df,
+                        normativa_df=selected_normativa_df,
+                        config=cfg,
+                        min_score=config.get("min_semantic_score", 0.30),
+                        top_k=config.get("faiss_top_k", 5),
+                        incluir_referencias=(preset_art == "Todo el articulado"),
+                        progress_callback=lambda via, h, t: _on_progress(h, t, {"jerarquia": f"Vía {via} ({h}/{t})"}),
+                    )
+                    st.session_state["bundle"] = bundle
+                    results_df = bundle.vista_manual
+                else:
+                    results_df = service.comparar(
+                        st.session_state["normativa_index"],
+                        selected_manual_df,
+                        selected_normativa_df,
+                        cfg,
+                        progress_callback=_on_progress,
+                        desc=mode,
+                        cancelar=handle.cancelar,
+                    )
+                    st.session_state.pop("bundle", None)
+
                 handle.estado = EstadoCorrida.COMPLETADO
                 st.session_state["results_df"] = results_df
-                # Una corrida completa borra la marca de la anterior. Sin esto, tras un
-                # aborto la pestaña de resultados sigue avisando "no usar como papel de
-                # trabajo" sobre un papel de trabajo perfectamente válido.
+                st.session_state["run_scope"] = current_run_scope
                 st.session_state.pop("run_parcial", None)
 
                 generados = service.exportar(results_df, rutas)
@@ -509,41 +573,81 @@ with tab_results:
                     )
                 )
 
-        counts = results_df["nivel_cumplimiento"].value_counts()
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("✅ Cumple", int(counts.get("cumple", 0)))
-        m2.metric("🟡 Parcial", int(counts.get("parcial", 0)))
-        m3.metric("🔴 Omisión", int(counts.get("omision", 0)))
-        m4.metric("⚪ No aplica", int(counts.get("no_aplica", 0)))
+        bundle = st.session_state.get("bundle")
+        if bundle is not None:
+            st.markdown("### 🧭 Análisis en Doble Vía (Ítem 6)")
+            c1, c2, c3, c4 = st.columns(4)
+            pct = bundle.cobertura.porcentaje * 100
+            c1.metric("🎯 Cobertura Global", f"{pct:.1f}%")
+            c2.metric("Artículos en alcance", bundle.cobertura.total_articulos)
+            c3.metric("Artículos cubiertos", len(bundle.cobertura.cubiertos))
+            c4.metric("Artículos sin cobertura", len(bundle.cobertura.sin_cobertura))
 
-        chart_df = counts.reindex(NIVEL_ORDER, fill_value=0).rename_axis("nivel").reset_index(name="secciones")
-        color_scale = alt.Scale(domain=NIVEL_ORDER, range=[NIVEL_COLORS[k]["fg"] for k in NIVEL_ORDER])
-        base = alt.Chart(chart_df).encode(
-            x=alt.X("nivel:N", sort=NIVEL_ORDER, title=None, axis=alt.Axis(labelAngle=0)),
-            y=alt.Y("secciones:Q", title="Secciones"),
-        )
-        bars = base.mark_bar(size=48, cornerRadiusTopLeft=4, cornerRadiusTopRight=4).encode(
-            color=alt.Color("nivel:N", scale=color_scale, legend=None),
-            tooltip=["nivel", "secciones"],
-        )
-        labels = base.mark_text(dy=-8, fontWeight="bold").encode(text="secciones:Q")
-        st.altair_chart((bars + labels).properties(height=280), width="stretch")
+            if bundle.alerta_cobertura:
+                st.warning(f"⚠️ **Alerta de Cobertura:** {bundle.alerta_cobertura}")
+                if bundle.cobertura.sin_cobertura:
+                    with st.expander("Listado de artículos sin cobertura (huérfanos)", expanded=False):
+                        for doc, num in bundle.cobertura.sin_cobertura:
+                            st.write(f"- `{doc}` — **Art. {num}**")
 
-        st.markdown("#### Detalle por sección")
-        niveles_filtro = st.multiselect("Filtrar por nivel de cumplimiento", NIVEL_ORDER, default=NIVEL_ORDER)
-        display_cols = [
-            c for c in ["jerarquia", "titulo_seccion", "tipo_coincidencia", "nivel_cumplimiento", "analisis_general"]
-            if c in results_df.columns
-        ]
-        filtered = results_df[results_df["nivel_cumplimiento"].isin(niveles_filtro)]
+            # Filtro de revisión manual (Ítem 10)
+            st.markdown("#### 🔍 Filtro de Calidad y Revisión Manual (Ítem 10)")
+            solo_revision = st.checkbox(
+                "Filtrar únicamente filas marcadas para revisión manual",
+                key="cfg_filter_review",
+            )
 
-        def _row_style(row: pd.Series) -> list[str]:
-            bg = NIVEL_COLORS.get(row["nivel_cumplimiento"], {}).get("bg", "")
-            return [f"background-color: {bg}"] * len(row)
+            tab_v1, tab_v2 = st.tabs(["📋 Por sección (Vía 1)", "📜 Por artículo (Vía 2)"])
+            with tab_v1:
+                df_v1 = bundle.vista_manual
+                if solo_revision and "requiere_revision_manual" in df_v1.columns:
+                    df_v1 = df_v1[df_v1["requiere_revision_manual"]]
+                st.caption(f"{len(df_v1)} secciones mostradas")
+                st.dataframe(df_v1, width="stretch", height=380)
 
-        st.dataframe(
-            filtered[display_cols].style.apply(_row_style, axis=1), width="stretch", height=420
-        )
+            with tab_v2:
+                df_v2 = bundle.vista_normativa
+                if solo_revision and "requiere_revision_manual" in df_v2.columns:
+                    df_v2 = df_v2[df_v2["requiere_revision_manual"]]
+                st.caption(f"{len(df_v2)} artículos mostrados")
+                st.dataframe(df_v2, width="stretch", height=380)
+
+        else:
+            counts = results_df["nivel_cumplimiento"].value_counts()
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("✅ Cumple", int(counts.get("cumple", 0)))
+            m2.metric("🟡 Parcial", int(counts.get("parcial", 0)))
+            m3.metric("🔴 Omisión", int(counts.get("omision", 0)))
+            m4.metric("⚪ No aplica", int(counts.get("no_aplica", 0)))
+
+            chart_df = counts.reindex(NIVEL_ORDER, fill_value=0).rename_axis("nivel").reset_index(name="secciones")
+            color_scale = alt.Scale(domain=NIVEL_ORDER, range=[NIVEL_COLORS[k]["fg"] for k in NIVEL_ORDER])
+            base = alt.Chart(chart_df).encode(
+                x=alt.X("nivel:N", sort=NIVEL_ORDER, title=None, axis=alt.Axis(labelAngle=0)),
+                y=alt.Y("secciones:Q", title="Secciones"),
+            )
+            bars = base.mark_bar(size=48, cornerRadiusTopLeft=4, cornerRadiusTopRight=4).encode(
+                color=alt.Color("nivel:N", scale=color_scale, legend=None),
+                tooltip=["nivel", "secciones"],
+            )
+            labels = base.mark_text(dy=-8, fontWeight="bold").encode(text="secciones:Q")
+            st.altair_chart((bars + labels).properties(height=280), width="stretch")
+
+            st.markdown("#### Detalle por sección")
+            niveles_filtro = st.multiselect("Filtrar por nivel de cumplimiento", NIVEL_ORDER, default=NIVEL_ORDER)
+            display_cols = [
+                c for c in ["jerarquia", "titulo_seccion", "tipo_coincidencia", "nivel_cumplimiento", "analisis_general"]
+                if c in results_df.columns
+            ]
+            filtered = results_df[results_df["nivel_cumplimiento"].isin(niveles_filtro)]
+
+            def _row_style(row: pd.Series) -> list[str]:
+                bg = NIVEL_COLORS.get(row["nivel_cumplimiento"], {}).get("bg", "")
+                return [f"background-color: {bg}"] * len(row)
+
+            st.dataframe(
+                filtered[display_cols].style.apply(_row_style, axis=1), width="stretch", height=420
+            )
 
         st.markdown("#### Exportar")
         c1, c2, c3 = st.columns(3)
