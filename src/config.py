@@ -101,6 +101,15 @@ FAISS_TOP_K: int = 5          # candidatos iniciales del índice FAISS
 RERANKER_TOP_N: int = 3       # candidatos tras reranking
 MIN_SEMANTIC_SCORE: float = 0.30  # umbral mínimo de similitud coseno
 
+# ── Revisión manual (ítem 10) ─────────────────────────────────────────────
+# Semi-ancho de la "banda de indecisión" alrededor de MIN_SEMANTIC_SCORE: un candidato
+# con score en [0.25, 0.35] pasó o no pasó el corte por centésimas, y esa distinción no
+# la sostiene ningún embedding. En vez de fingir que el umbral es una frontera nítida, se
+# marca la franja para que la mire una persona (Bloque A: la herramienta marca y explica,
+# no resuelve). Subirlo marca más aristas y cuesta horas de revisión; bajarlo a 0 apaga
+# el disparador salvo el empate exacto con el umbral.
+DELTA_INDECISION: float = 0.05
+
 # ── Parámetros Docling (parseo de manuales) ───────────────────────────────
 DOCLING_MAX_TOKENS: int = 512  # max tokens por chunk HybridChunker
 

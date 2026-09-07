@@ -31,6 +31,7 @@ from .coverage import (
     ORIGEN_LEXICO_AMBIGUO,
     ORIGEN_SEMANTICO_V1,
     ORIGEN_SEMANTICO_V2,
+    MOTIVO_CITA_AMBIGUA,
     Cobertura,
     CoverageLink,
     LinkTable,
@@ -125,7 +126,7 @@ def _links_desde_via1(
             relevante=None if ambiguo else True,
             razon=m.get("razon_match", "") or "cita explícita del artículo",
             requiere_revision=ambiguo,
-            motivos_revision=("cita_ambigua",) if ambiguo else (),
+            motivos_revision=(MOTIVO_CITA_AMBIGUA,) if ambiguo else (),
         ))
 
     for c in graduados:
@@ -248,6 +249,12 @@ def run_dual(
         tabla.extend(_links_desde_via2(articulo, candidatas, veredicto, workspace_id))
         if progress_callback:
             progress_callback("via2", i, len(articulos))
+
+    # Ítem 10 · una sola pasada, con la tabla ya consolidada: los disparadores miran el
+    # estado final de cada pareja (orígenes de las dos vías, veredicto, brechas), no el
+    # intermedio. `min_score` es el de esta corrida, no el default del módulo — la banda
+    # de indecisión se define alrededor del umbral que realmente se usó.
+    tabla.evaluar_revision_manual(min_score=min_score)
 
     cobertura = cobertura_global(tabla, normativa_df, incluir_referencias)
     bundle = ComparisonBundle(

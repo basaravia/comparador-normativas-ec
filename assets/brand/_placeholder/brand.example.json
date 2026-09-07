@@ -76,12 +76,12 @@
       "Los ratios son de neutros.texto.hex sobre el tinte."
     ],
     "cumple": {
-      "tinte": "#DDF0EE",
-      "ratio_texto": 10.15,
+      "tinte": "#DCF0E0",
+      "ratio_texto": 10.04,
       "icono": "check",
       "etiqueta": "Cumple",
-      "marca": "#0369A1",
-      "ratio_marca": 5.93
+      "marca": "#15803D",
+      "ratio_marca": 5.02
     },
     "parcial": {
       "tinte": "#FFF2CC",
@@ -104,10 +104,17 @@
       "ratio_texto": 10.71,
       "icono": "minus",
       "etiqueta": "No aplica",
-      "marca": "#6B7280",
-      "ratio_marca": 4.83
+      "marca": "#737373",
+      "ratio_marca": 4.74
     },
-    "_nota_cumple": "Se usa un tinte verde-azulado, no verde puro: si la marca real es verde, un 'cumple' verde se confunde con el cromo (§8.2).",
+    "_nota_cumple": [
+      "El color de 'cumple' se elige CONTRA el cromo de la marca activa, no en abstracto.",
+      "En este placeholder el cromo es azul (#2C5282) y el acento un azul claro (#63B3ED),",
+      "asi que 'cumple' va en verde (142 grados de tono): lejos de ambos y sin ambiguedad.",
+      "Si al copiar este archivo a brand.json la marca real resulta ser VERDE, hay que mover",
+      "'cumple' a otra familia de tono — un 'cumple' verde sobre un cromo verde es exactamente",
+      "la confusion cromo/dato que la seccion 8.2 existe para evitar."
+    ],
     "_nota_marca": [
       "'tinte' es relleno de fondo con texto oscuro encima (tablas, celdas de Excel).",
       "'marca' es el color del trazo saturado para graficas: una barra pintada con el",
@@ -117,11 +124,18 @@
     ],
     "_nota_hue": [
       "SEPARACION DE TONO, no solo desigualdad de hex.",
-      "La primera version usaba #0F766E para 'cumple': 175 grados frente a los 147 del",
-      "primario institucional, solo 28 de separacion. Dos verdes contiguos — exactamente",
-      "la confusion cromo/dato que la seccion 8.2 existe para evitar, y la prueba no la",
-      "detectaba porque solo comparaba igualdad exacta de hex.",
-      "Regla: toda 'marca' debe caer FUERA de la banda del primario, +/-45 grados."
+      "Historia del defecto: la primera version usaba #0F766E para 'cumple' (175 grados)",
+      "frente a un primario de 147 — solo 28 de separacion, dos verdes contiguos. La prueba",
+      "de entonces no lo veia porque solo comparaba igualdad exacta de hex, y desigualdad",
+      "no es distinguibilidad.",
+      "Segunda iteracion, mismo defecto por el otro lado: al pasar el cromo de este",
+      "placeholder a azul (#2C5282, 213 grados) quedaron dentro de la banda 'cumple'",
+      "(#0369A1, 201 grados: 12 de separacion del primario y 4 del acento) y 'no_aplica'",
+      "(#6B7280, 220 grados: 6 del primario). Ahora 'cumple' es verde (#15803D, 142) y",
+      "'no_aplica' es un gris SIN croma (#737373, saturacion 0), que no puede caer en la",
+      "banda de ningun cromo por no tener tono propio.",
+      "Regla: toda 'marca' debe caer FUERA de la banda del primario Y del acento, +/-45",
+      "grados, ademas de cumplir >=3:1 sobre blanco."
     ]
   },
   "logos": {

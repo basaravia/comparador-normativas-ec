@@ -29,6 +29,8 @@ from typing import Iterable, Iterator
 
 import pandas as pd
 
+from .config import DELTA_INDECISION, MIN_SEMANTIC_SCORE
+
 logger = logging.getLogger(__name__)
 
 VERSION_ESQUEMA = 1
@@ -39,6 +41,29 @@ ORIGEN_LEXICO_AMBIGUO = "lexico_ambiguo"   # cita un número que existe en varia
 ORIGEN_SEMANTICO_V1 = "semantico_v1"  # recuperado desde la sección (Vía 1)
 ORIGEN_SEMANTICO_V2 = "semantico_v2"  # recuperado desde el artículo (Vía 2)
 ORIGEN_MANUAL = "manual"              # añadido por una persona
+
+# ── Vocabulario de motivos de revisión manual (ítem 10) ───────────────────────
+# Constantes y no literales sueltos: los produce `coverage`, los escribe `llm_grader`,
+# los agrega `dual` y los filtra la interfaz. Un motivo mal escrito en uno de esos cuatro
+# sitios no rompe nada visiblemente — simplemente deja de aparecer en el filtro "Solo
+# revisión manual", que es la peor forma de fallar para un flag cuya razón de ser es que
+# nada quede sin mirar.
+MOTIVO_BANDA_INDECISION = "score_en_banda_de_indecision"
+MOTIVO_VEREDICTO_INDETERMINADO = "veredicto_indeterminado"
+MOTIVO_CONFLICTO_LEXICO_SEMANTICO = "conflicto_lexico_semantico"
+MOTIVO_ARTICULO_SIN_COBERTURA = "articulo_sin_cobertura"
+MOTIVO_PARCIAL_CON_BRECHAS = "parcial_con_brechas"
+# Producidos aguas arriba (`dual`, `llm_grader`), se listan aquí para que el vocabulario
+# viva en un solo módulo.
+MOTIVO_CITA_AMBIGUA = "cita_ambigua"
+MOTIVO_GRADING_NO_PARSEABLE = "grading_no_parseable"
+MOTIVO_CANDIDATO_AUSENTE = "candidato_ausente_del_grading"
+
+# Qué tipo de evidencia aporta cada origen. El disparador de conflicto necesita
+# distinguirlos: "el manual cita el artículo" y "el artículo se parece a la sección" son
+# dos afirmaciones independientes, y que se contradigan es justamente la señal.
+ORIGENES_LEXICOS = (ORIGEN_LEXICO, ORIGEN_LEXICO_AMBIGUO)
+ORIGENES_SEMANTICOS = (ORIGEN_SEMANTICO_V1, ORIGEN_SEMANTICO_V2)
 
 _PRECEDENCIA = {
     ORIGEN_LEXICO: 4,
@@ -86,8 +111,31 @@ class CoverageLink:
     relevante: bool | None = None
     razon: str = ""
 
+    # Veredicto de cumplimiento de la pareja, cuando el análisis comparativo lo produjo
+    # (`llm_grader.ComparisonResult`). Vive en la arista y no solo en la fila del Excel
+    # porque el disparador "parcial con brechas declaradas" del ítem 10 se evalúa aquí.
+    nivel_cumplimiento: str | None = None
+    brechas: tuple[str, ...] = ()
+
+    # Ítem 10. `requiere_revision_manual` no es "el análisis falló": es "el análisis no
+    # alcanza para cerrar el veredicto y tiene que mirarlo una persona". La herramienta
+    # marca y explica; no intenta resolverlo sola (Bloque A).
+    #
+    # Dos campos para un solo hecho, a propósito: el nombre corto es el que escriben los
+    # productores anteriores al ítem 10 (`dual`, `llm_grader`, checkpoints en parquet) y
+    # el largo el que dice qué significa. Renombrar de golpe rompería los checkpoints ya
+    # pagados en horas de LLM, así que conviven y `__post_init__` los mantiene idénticos:
+    # marcar cualquiera de los dos marca la arista.
     requiere_revision: bool = False
+    requiere_revision_manual: bool = False
     motivos_revision: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        # `object.__setattr__` porque la dataclass es `frozen`; sincronizar aquí es lo que
+        # permite que ninguna vista tenga que preguntarse cuál de los dos nombres miró.
+        marcada = bool(self.requiere_revision) or bool(self.requiere_revision_manual)
+        object.__setattr__(self, "requiere_revision", marcada)
+        object.__setattr__(self, "requiere_revision_manual", marcada)
 
     @property
     def clave(self) -> tuple[str, str, str]:
@@ -102,6 +150,104 @@ class CoverageLink:
             if s is not None:
                 return float(s)
         return 0.0
+
+    # ── Disparadores de revisión manual (ítem 10) ─────────────────────────
+
+    @property
+    def evidencia_lexica(self) -> bool:
+        """¿Alguna observación de esta pareja vino de una cita explícita?
+
+        Mira `origen` **y** `origenes`: una arista recién construida por `dual` todavía no
+        pasó por `LinkTable.upsert`, que es quien puebla la tupla acumulada.
+        """
+        return bool(self._origenes_todos & set(ORIGENES_LEXICOS))
+
+    @property
+    def evidencia_semantica(self) -> bool:
+        return bool(self._origenes_todos & set(ORIGENES_SEMANTICOS))
+
+    @property
+    def _origenes_todos(self) -> set[str]:
+        return set(self.origenes) | {self.origen}
+
+    def motivos_de_revision(
+        self,
+        delta_indecision: float = DELTA_INDECISION,
+        min_score: float | None = None,
+    ) -> tuple[str, ...]:
+        """Los motivos que **el estado de esta arista** dispara, sin mirar los ya escritos.
+
+        Puro y sin efectos: devuelve lo que se deduce de los campos. Quien quiera la arista
+        marcada usa `evaluar_revision_manual`, que une esto con los motivos que ya venían
+        de aguas arriba (`cita_ambigua`, `grading_no_parseable`, …).
+
+        `MOTIVO_ARTICULO_SIN_COBERTURA` no aparece aquí a propósito: no es una propiedad de
+        ninguna arista, sino la ausencia de todas ellas para un artículo. Lo evalúa
+        `vista_normativa`, que es quien ve el artículo entero.
+        """
+        umbral = MIN_SEMANTIC_SCORE if min_score is None else float(min_score)
+        motivos: list[str] = []
+
+        # 1 · Banda de indecisión. El umbral no es una frontera real: dos candidatos a
+        # 0.299 y 0.301 no se distinguen en nada salvo en de qué lado del corte cayeron.
+        if self.score_semantico is not None:
+            delta = abs(float(delta_indecision))
+            if umbral - delta <= float(self.score_semantico) <= umbral + delta:
+                motivos.append(MOTIVO_BANDA_INDECISION)
+
+        # 2 · Veredicto indeterminado (ítem 4). `is None`, nunca falsy: False es un juicio
+        # y None es la ausencia de juicio, y tratarlos igual es lo que colaba falsos
+        # positivos de cumplimiento.
+        if self.relevante is None:
+            motivos.append(MOTIVO_VEREDICTO_INDETERMINADO)
+
+        # 3 · Conflicto entre las dos evidencias.
+        #   · El manual cita el artículo y el grading dice que no le aplica: una de las dos
+        #     lecturas está mal y ninguna heurística puede decir cuál.
+        #   · El recíproco literal —relevancia semántica sin cita léxica— es el caso normal
+        #     y marcarlo entero dejaría el flag inservible. Se acota a cuando la evidencia
+        #     que debería sostener esa relevancia tampoco la sostiene: el score quedó por
+        #     debajo del umbral y aun así el veredicto afirma que sí aplica.
+        if self.evidencia_lexica and self.relevante is False:
+            motivos.append(MOTIVO_CONFLICTO_LEXICO_SEMANTICO)
+        elif (
+            self.evidencia_semantica
+            and not self.evidencia_lexica
+            and self.relevante is True
+            and self.score_semantico is not None
+            and float(self.score_semantico) < umbral
+        ):
+            motivos.append(MOTIVO_CONFLICTO_LEXICO_SEMANTICO)
+
+        # 4 · Cumplimiento parcial con brechas declaradas. "Parcial" sin brechas es un
+        # veredicto cerrado; con brechas, el modelo ya dijo qué le falta y quién decide si
+        # eso basta es el auditor, no la herramienta.
+        if self.nivel_cumplimiento == "parcial" and len(self.brechas) > 0:
+            motivos.append(MOTIVO_PARCIAL_CON_BRECHAS)
+
+        return tuple(motivos)
+
+    def evaluada(
+        self,
+        delta_indecision: float = DELTA_INDECISION,
+        min_score: float | None = None,
+    ) -> CoverageLink:
+        """Copia de esta arista con los disparadores del ítem 10 aplicados.
+
+        Idempotente y aditiva: los motivos previos se conservan (los produjeron `dual` y
+        `llm_grader`, que ven cosas que la arista ya no recuerda) y una arista marcada a
+        mano no se desmarca porque ningún disparador automático la reconozca.
+        """
+        motivos = set(self.motivos_revision) | set(
+            self.motivos_de_revision(delta_indecision, min_score)
+        )
+        marcada = bool(motivos) or self.requiere_revision_manual
+        return replace(
+            self,
+            requiere_revision=marcada,
+            requiere_revision_manual=marcada,
+            motivos_revision=tuple(sorted(motivos)),
+        )
 
 
 class LinkTable:
@@ -157,7 +303,21 @@ class LinkTable:
             # que una vía no pudiera decidir no borra que la otra sí pudo.
             relevante=actual.relevante if actual.relevante is not None else nuevo.relevante,
             razon=nuevo.razon if gana_nuevo and nuevo.razon else actual.razon,
-            requiere_revision=actual.requiere_revision or nuevo.requiere_revision,
+            nivel_cumplimiento=(
+                nuevo.nivel_cumplimiento if gana_nuevo and nuevo.nivel_cumplimiento
+                else actual.nivel_cumplimiento or nuevo.nivel_cumplimiento
+            ),
+            brechas=tuple(sorted(set(actual.brechas) | set(nuevo.brechas))),
+            # La marca de revisión se une, no se sobrescribe: que una vía no viera motivo
+            # para revisar no borra el que sí encontró la otra. Basta con unir un alias
+            # —`__post_init__` propaga al otro—, pero se pasan los dos para que un
+            # `replace` no arrastre el valor viejo del que se omitiera.
+            requiere_revision=(
+                actual.requiere_revision or nuevo.requiere_revision
+            ),
+            requiere_revision_manual=(
+                actual.requiere_revision_manual or nuevo.requiere_revision_manual
+            ),
             motivos_revision=tuple(sorted(
                 set(actual.motivos_revision) | set(nuevo.motivos_revision)
             )),
@@ -183,6 +343,27 @@ class LinkTable:
         """Solo las confirmadas. `is True`, no truthiness: `None` es indeterminado."""
         return [x for x in self if x.relevante is True]
 
+    def para_revision(self) -> list[CoverageLink]:
+        """Las aristas marcadas — lo que alimenta el filtro "Solo revisión manual" y la
+        hoja dedicada del papel de trabajo (ítem 9)."""
+        return [x for x in self if x.requiere_revision_manual]
+
+    def evaluar_revision_manual(
+        self,
+        delta_indecision: float = DELTA_INDECISION,
+        min_score: float | None = None,
+    ) -> LinkTable:
+        """Aplica los disparadores del ítem 10 a todas las aristas. Devuelve `self`.
+
+        Se corre una vez, al final del pipeline y no dentro de `upsert`: los disparadores
+        miran el estado *consolidado* de la pareja (orígenes de las dos vías, veredicto,
+        brechas), y evaluarlos a mitad de la fusión marcaría aristas por evidencia que la
+        otra vía todavía no había aportado.
+        """
+        for clave, enlace in list(self._por_clave.items()):
+            self._por_clave[clave] = enlace.evaluada(delta_indecision, min_score)
+        return self
+
     # ── persistencia ──────────────────────────────────────────────────────
 
     def to_dataframe(self) -> pd.DataFrame:
@@ -195,6 +376,7 @@ class LinkTable:
             # se reconstruyen al cargar.
             d["origenes"] = "|".join(x.origenes)
             d["motivos_revision"] = "|".join(x.motivos_revision)
+            d["brechas"] = "|".join(x.brechas)
             filas.append(d)
         return pd.DataFrame(filas)
 
@@ -209,10 +391,19 @@ class LinkTable:
         df = pd.read_parquet(Path(path))
         tabla = cls()
         for d in df.to_dict("records"):
-            d["origenes"] = tuple(x for x in str(d.get("origenes", "")).split("|") if x)
-            d["motivos_revision"] = tuple(
-                x for x in str(d.get("motivos_revision", "")).split("|") if x
+            for campo in ("origenes", "motivos_revision", "brechas"):
+                d[campo] = tuple(x for x in str(d.get(campo, "")).split("|") if x)
+            # Compatibilidad hacia atrás: los checkpoints anteriores al ítem 10 traen solo
+            # la columna con el nombre corto, y los intermedios solo la larga. Un parquet
+            # viejo tiene que seguir cargando — es trabajo ya pagado en horas de LLM.
+            marcada = any(
+                bool(d[campo])
+                for campo in ("requiere_revision", "requiere_revision_manual")
+                if d.get(campo) is not None and not pd.isna(d[campo])
             )
+            d["requiere_revision"] = marcada
+            d["requiere_revision_manual"] = marcada
+            d = {k: v for k, v in d.items() if k in CoverageLink.__dataclass_fields__}
             for campo in ("score_semantico", "score_reranker", "score_grade"):
                 if d.get(campo) is not None and pd.isna(d[campo]):
                     d[campo] = None
@@ -232,6 +423,27 @@ def _mejor(a: float | None, b: float | None) -> float | None:
     return max(a, b)
 
 
+def evaluar_revision_manual(
+    link: CoverageLink | Iterable[CoverageLink],
+    delta_indecision: float = DELTA_INDECISION,
+    min_score: float | None = None,
+) -> CoverageLink | list[CoverageLink]:
+    """Marca una arista —o una lista de ellas— con los disparadores del ítem 10.
+
+    Punto de entrada público del ítem: acepta lo uno o lo otro porque los tres sitios que
+    lo llaman traen formas distintas (una arista suelta al editarla desde la interfaz, la
+    lista que devuelve una vía, la tabla entera al cerrar la corrida) y no tiene sentido
+    que cada uno recuerde qué envoltorio le toca. Para la tabla completa está
+    `LinkTable.evaluar_revision_manual`, que además reindexa por clave.
+
+    Devuelve objetos nuevos: `CoverageLink` es `frozen` y las aristas de entrada quedan
+    intactas.
+    """
+    if isinstance(link, CoverageLink):
+        return link.evaluada(delta_indecision, min_score)
+    return [x.evaluada(delta_indecision, min_score) for x in link]
+
+
 # ── Agregaciones ──────────────────────────────────────────────────────────────
 
 def vista_manual(tabla: LinkTable, manual_df: pd.DataFrame) -> pd.DataFrame:
@@ -246,6 +458,7 @@ def vista_manual(tabla: LinkTable, manual_df: pd.DataFrame) -> pd.DataFrame:
         chunk_id = seccion.get("chunk_id", "")
         enlaces = tabla.por_seccion(chunk_id)
         confirmados = [e for e in enlaces if e.relevante is True]
+        revisar = any(e.requiere_revision_manual for e in enlaces)
         filas.append({
             "chunk_id": chunk_id,
             "seccion_doc_id": seccion.get("doc_id", ""),
@@ -256,7 +469,10 @@ def vista_manual(tabla: LinkTable, manual_df: pd.DataFrame) -> pd.DataFrame:
             "articulos": [e.articulo_numero for e in confirmados],
             "normativas": sorted({e.articulo_doc_id for e in confirmados}),
             "origenes": sorted({o for e in enlaces for o in e.origenes}),
-            "requiere_revision": any(e.requiere_revision for e in enlaces),
+            # Las dos columnas dicen lo mismo: el consumidor (Excel, API, interfaz) puede
+            # haberse escrito contra cualquiera de los dos nombres.
+            "requiere_revision": revisar,
+            "requiere_revision_manual": revisar,
             "motivos_revision": sorted({m for e in enlaces for m in e.motivos_revision}),
         })
     return pd.DataFrame(filas)
@@ -281,6 +497,13 @@ def vista_normativa(tabla: LinkTable, normativa_df: pd.DataFrame,
         element_id = art.get("element_id", "")
         enlaces = tabla.por_articulo(element_id)
         confirmados = [e for e in enlaces if e.relevante is True]
+        # Un artículo sin cobertura confirmada se revisa siempre: no tener candidatos
+        # —o tenerlos y que ninguno resultara relevante— no es haber comprobado que no le
+        # aplica nada. Es el disparador `articulo_sin_cobertura` del ítem 10, y la
+        # condición tiene que ser la misma que la del motivo de abajo: un artículo que
+        # listara el motivo sin quedar marcado no aparecería en el filtro "Solo revisión
+        # manual", que es donde alguien iría a buscarlo.
+        revisar = any(e.requiere_revision_manual for e in enlaces) or not confirmados
         filas.append({
             "element_id": element_id,
             "articulo_doc_id": art.get("doc_id", ""),
@@ -291,10 +514,11 @@ def vista_normativa(tabla: LinkTable, normativa_df: pd.DataFrame,
             "secciones_que_lo_cubren": [e.seccion_jerarquia for e in confirmados],
             "cubierto": bool(confirmados),
             "origenes": sorted({o for e in enlaces for o in e.origenes}),
-            "requiere_revision": any(e.requiere_revision for e in enlaces) or not enlaces,
+            "requiere_revision": revisar,
+            "requiere_revision_manual": revisar,
             "motivos_revision": sorted(
                 {m for e in enlaces for m in e.motivos_revision}
-                | ({"articulo_sin_cobertura"} if not confirmados else set())
+                | ({MOTIVO_ARTICULO_SIN_COBERTURA} if not confirmados else set())
             ),
         })
     return pd.DataFrame(filas)
