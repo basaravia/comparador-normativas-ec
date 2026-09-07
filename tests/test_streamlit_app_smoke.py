@@ -32,9 +32,12 @@ def test_app_renders_without_exceptions(at: AppTest):
     assert not at.exception, f"la app lanzó excepciones en el render inicial: {list(at.exception)}"
 
 
-def test_app_renders_sidebar_and_four_tabs(at: AppTest):
+def test_app_renders_sidebar_and_five_tabs(at: AppTest):
     assert len(at.sidebar) > 0, "la barra lateral debe tener widgets"
-    assert len(at.tabs) == 4, "la app debe exponer las 4 pestañas del flujo (Documentos/Índice/Comparación/Resultados)"
+    assert len(at.tabs) == 5, (
+        "la app debe exponer las 5 pestañas del flujo "
+        "(Documentos/Índice/Comparación/Resultados/Visor PDF)"
+    )
 
 
 class TestSidebarDefaultsMatchConfig:

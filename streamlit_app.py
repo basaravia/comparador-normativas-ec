@@ -12,6 +12,7 @@ Ejecutar con:  streamlit run streamlit_app.py
 from __future__ import annotations
 
 import logging
+import os
 import time
 from pathlib import Path
 
@@ -24,6 +25,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
+from app import chunk_inspector, pdf_viewer
 from app.logging_utils import clear_log_lines, get_log_lines, save_run_log, setup_logging
 from app.auth import check_auth, render_user_sidebar
 from app.theme import NIVEL_COLORS, inject_theme, render_header
@@ -43,8 +45,18 @@ UPLOAD_NORMATIVA_DIR = Path("output/uploads/normativas")
 UPLOAD_MANUAL_DIR = Path("output/uploads/manuales")
 NIVEL_ORDER = ["cumple", "parcial", "omision", "no_aplica"]
 
+# Databricks Apps inyecta DATABRICKS_APP_PORT con el puerto real del contenedor. El
+# bind en sí lo decide `app.yaml` (el server de Streamlit ya está arrancado y
+# escuchando cuando este script se ejecuta, así que asignarlo aquí no lo cambiaría);
+# se lee de todos modos para que el puerto quede visible en el log al arrancar y
+# como constante única si algún día hace falta construir una URL propia dentro de
+# la app. Fuera de Databricks Apps (dev local) no está definida y cae a 8501, el
+# puerto por defecto de `streamlit run`.
+APP_PORT = int(os.getenv("DATABRICKS_APP_PORT", "8501"))
+
 inject_theme()
 setup_logging()
+logger.info("Arrancando streamlit_app.py — puerto esperado: %d", APP_PORT)
 
 # La autenticación se evalúa antes de renderizar el resto de la aplicación.
 # En modo no autenticado, check_auth() muestra únicamente el formulario y
@@ -233,8 +245,8 @@ def _pdf_picker(label: str, existing_dir: Path, upload_dir: Path, key: str, excl
 # Pestañas principales
 # ──────────────────────────────────────────────────────────────────────────
 
-tab_docs, tab_index, tab_compare, tab_results = st.tabs(
-    ["📄 1. Documentos", "🧭 2. Índice", "⚡ 3. Comparación", "📊 4. Resultados"]
+tab_docs, tab_index, tab_compare, tab_results, tab_viewer = st.tabs(
+    ["📄 1. Documentos", "🧭 2. Índice", "⚡ 3. Comparación", "📊 4. Resultados", "🔍 5. Visor PDF"]
 )
 
 with tab_docs:
@@ -318,6 +330,15 @@ with tab_index:
                 for r in results:
                     score = r.get("reranker_score", r.get("similarity"))
                     st.write(f"**Art. {r.get('numero', '?')}** — {r.get('encabezado', '')[:90]}  ·  score={score}")
+
+        st.markdown("---")
+        st.markdown("#### 🧬 Inspector de chunks semánticos (parent-child)")
+        st.caption(
+            "Vista previa de cómo `src/chunking.py` subdividiría cada artículo en "
+            "sub-chunks parent-child — independiente de si el índice de arriba ya está "
+            "construido."
+        )
+        chunk_inspector.render_chunk_inspector(st.session_state["normativa_df"])
 
 with tab_compare:
     st.subheader("Comparación normativa vs manual")
@@ -681,3 +702,20 @@ with tab_results:
         with c3:
             log_text = "\n".join(get_log_lines())
             st.download_button("⬇️ Log de sesión", data=log_text.encode("utf-8"), file_name="sesion.log", mime="text/plain")
+
+with tab_viewer:
+    st.subheader("Visor de PDF")
+    st.caption(
+        "Hojea el PDF original —normativa o manual, existente o recién subido— para "
+        "contrastarlo visualmente contra el texto tabulado en las pestañas anteriores."
+    )
+    pdfs_disponibles = pdf_viewer.listar_pdfs(
+        [NORMATIVA_DIR, UPLOAD_NORMATIVA_DIR, MANUAL_DIR, UPLOAD_MANUAL_DIR]
+    )
+    if not pdfs_disponibles:
+        st.info("No hay PDFs disponibles todavía. Sube documentos en la pestaña **1. Documentos**.")
+    else:
+        pdf_elegido = st.selectbox(
+            "Documento", pdfs_disponibles, format_func=lambda p: p.name, key="viewer_pdf_select"
+        )
+        pdf_viewer.render_pdf_viewer(pdf_elegido, key="viewer_main")

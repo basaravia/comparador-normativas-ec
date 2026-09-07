@@ -28,6 +28,8 @@ pandas>=2.0.0
 numpy>=2.0.0
 openpyxl>=3.1.0                 # exportación a Excel (.xlsx)
 pillow>=10.0.0                  # procesamiento de imágenes (Docling OCR)
+pypdfium2>=4.30.0                # render de páginas PDF a imagen (app/pdf_viewer.py); ya
+                                 # llegaba transitivo vía Docling, ahora es import directo
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
 tqdm>=4.66.0
