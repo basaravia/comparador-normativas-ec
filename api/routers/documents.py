@@ -35,12 +35,18 @@ def get_document_cache() -> dict[str, Any]:
 
 
 def _buscar_pdf(tipo: str, doc_id: str) -> Optional[Path]:
+    safe_name = Path(doc_id).name
+    if not safe_name or safe_name in (".", "..") or "/" in doc_id or "\\" in doc_id:
+        return None
     directorios = [NORMATIVA_DIR, UPLOAD_NORMATIVA_DIR] if tipo == "normativa" else [MANUAL_DIR, UPLOAD_MANUAL_DIR]
-    nombre = doc_id if doc_id.endswith(".pdf") else f"{doc_id}.pdf"
+    nombre = safe_name if safe_name.endswith(".pdf") else f"{safe_name}.pdf"
     for d in directorios:
-        p = d / nombre
-        if p.exists():
-            return p
+        try:
+            p = (d / nombre).resolve()
+            if p.is_relative_to(d.resolve()) and p.exists():
+                return p
+        except (ValueError, RuntimeError):
+            continue
     return None
 
 
@@ -103,16 +109,23 @@ async def upload_document(tipo: str, file: UploadFile = File(...)):
     if not file.filename or not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Solo se permiten archivos .pdf")
 
+    safe_filename = Path(file.filename).name
+    if not safe_filename or safe_filename in (".", "..") or "/" in file.filename or "\\" in file.filename:
+        raise HTTPException(status_code=400, detail="Nombre de archivo inválido")
+
     destino_dir = UPLOAD_NORMATIVA_DIR if tipo == "normativa" else UPLOAD_MANUAL_DIR
     destino_dir.mkdir(parents=True, exist_ok=True)
-    destino_path = destino_dir / file.filename
+    destino_path = (destino_dir / safe_filename).resolve()
+
+    if not destino_path.is_relative_to(destino_dir.resolve()):
+        raise HTTPException(status_code=400, detail="Ruta de destino inválida")
 
     with open(destino_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
     return {
         "status": "ok",
-        "id": file.filename,
+        "id": safe_filename,
         "size_bytes": destino_path.stat().st_size,
     }
 
