@@ -246,25 +246,53 @@ class NormativaIndex:
         min_score: float = MIN_SEMANTIC_SCORE,
         source_filter: Optional[str] = None,
     ) -> list[dict]:
-        """Retorna top-k artículos de la normativa más similares a la consulta."""
+        """Retorna top-k artículos de la normativa más similares a la consulta.
+
+        Si el índice se construyó sobre sub-chunks (chunking semántico parent-child,
+        ver `_registrar_df`), agrupa por artículo padre: antes esto pedía `top_k`
+        vecinos sin más, así que un artículo muy subdividido podía copar el resultado
+        con varios de sus propios fragmentos y desplazar artículos genuinamente
+        distintos — contradiciendo la garantía documentada en `_registrar_df`
+        ("top_k sigue significando k artículos, no k fragmentos"). Pedir
+        `top_k * _max_chunks_por_padre` vecinos es lo que garantiza, en el peor caso
+        (los primeros aciertos son todos del mismo artículo), que sobrevivan `top_k`
+        artículos distintos.
+        """
         self._require_index()
 
         # Ver comentario equivalente en build(): el prefijo de consulta también
         # depende del backend, no se fija a ciegas.
         prefix = getattr(self._backend, "query_prefix", "")
         vec = self._backend.encode([query], prefix=prefix)
-        scores, indices = self._index.search(vec, top_k)
+
+        k_pedido = top_k * self._max_chunks_por_padre if self._col_padre else top_k
+        scores, indices = self._index.search(vec, k_pedido)
         scores = scores[0].tolist()
         indices = indices[0].tolist()
 
         results = []
+        padres_vistos: set = set()
         for score, idx in zip(scores, indices):
             if idx < 0 or score < min_score:
                 continue
             row = self._df.iloc[idx].to_dict()
             if source_filter and row.get("doc_id") != source_filter:
                 continue
+
+            if self._col_padre:
+                padre_id = row.get(self._col_padre)
+                # FAISS ya devuelve los vecinos ordenados por score descendente, así
+                # que el primer sub-chunk de un padre que se ve aquí es el de mejor
+                # score de ese artículo — los siguientes del mismo padre se descartan.
+                clave = padre_id if pd.notna(padre_id) else f"__sin_padre_{idx}"
+                if clave in padres_vistos:
+                    continue
+                padres_vistos.add(clave)
+                row = como_articulo_padre(row)
+
             results.append({**row, "similarity": round(float(score), 4), "rank_faiss": len(results) + 1})
+            if len(results) >= top_k:
+                break
 
         return results
 
@@ -372,6 +400,14 @@ class NormativaIndex:
             else df
         )
         if df_arts.empty:
+            return []
+
+        # Antes de la reescritura para desambiguación, esto era `row.get("numero", "")`
+        # por fila — tolerante a un DataFrame sin columna "numero". El acceso directo
+        # `df_arts["numero"]` la exige, y un DataFrame construido a mano o mapeado
+        # parcialmente (sin esa columna) revienta con KeyError en vez de, como antes,
+        # devolver simplemente que no hay coincidencias.
+        if "numero" not in df_arts.columns:
             return []
 
         numeros = df_arts["numero"].astype(str).str.strip()

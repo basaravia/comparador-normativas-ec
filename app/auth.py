@@ -3,22 +3,30 @@
 from __future__ import annotations
 
 import hmac
-import os
+
 import streamlit as st
+
+from src.settings import get as get_setting
 
 DEFAULT_USERNAME = "asaravia002"
 
 
 def is_auth_enabled() -> bool:
-    """Indica si la autenticación está activa. Por defecto True."""
-    val = os.getenv("AUTH_ENABLED", "true").strip().lower()
-    return val not in ("false", "0", "no", "off", "disable", "disabled")
+    """Indica si la autenticación está activa. Por defecto True.
+
+    Vía `src.settings.get()`, no `os.getenv()` directo: este módulo se importa antes
+    de que nada más en la app cargue `.env` (`streamlit_app.py` llama a `check_auth()`
+    en el arranque), así que un `AUTH_ENABLED`/`AUTH_PASSWORD` puesto solo en `.env`
+    —la convención documentada del proyecto— se leía como si no existiera. `get()`
+    llama a `cargar_env()` internamente antes de mirar el entorno.
+    """
+    return get_setting("AUTH_ENABLED", default="true", cast=bool)
 
 
 def get_configured_credentials() -> tuple[str, str]:
     """Retorna el usuario y contraseña configurados vía variables de entorno o defaults."""
-    user = os.getenv("AUTH_USERNAME", DEFAULT_USERNAME)
-    pwd = os.getenv("AUTH_PASSWORD", "")
+    user = get_setting("AUTH_USERNAME", default=DEFAULT_USERNAME)
+    pwd = get_setting("AUTH_PASSWORD", default="")
     return user, pwd
 
 
@@ -41,6 +49,19 @@ def check_auth() -> bool:
 
     if st.session_state.get("authenticated", False):
         return True
+
+    _, expected_pwd = get_configured_credentials()
+    if not expected_pwd:
+        # Fail-closed: AUTH_ENABLED=true sin AUTH_PASSWORD configurada dejaba entrar
+        # con cualquier usuario y contraseña vacía (hmac.compare_digest("", "") es
+        # True). No hay contraseña por defecto segura que inventar aquí — se detiene
+        # la app y se dice exactamente qué falta, en vez de abrir el acceso.
+        st.error(
+            "🔒 Autenticación habilitada pero `AUTH_PASSWORD` no está configurada. "
+            "La app no puede arrancar así — defínela en `.env` o desactiva la "
+            "autenticación con `AUTH_ENABLED=false` si es un entorno de prueba local."
+        )
+        st.stop()
 
     # Renderiza tarjeta de login limpia y centrada
     col1, col2, col3 = st.columns([1, 2, 1])

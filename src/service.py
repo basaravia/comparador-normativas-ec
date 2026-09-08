@@ -334,16 +334,22 @@ def exportar(
 def construir_indice_manual(
     manual_df: pd.DataFrame,
     config: ServiceConfig,
-) -> NormativaIndex:
-    """Construye el índice semántico sobre las secciones del manual (para Vía 2)."""
+):
+    """Construye el índice semántico sobre las secciones del manual (para Vía 2).
+
+    Antes instanciaba `search_engine.NormativaIndex` — la clase de la Vía 1 ("¿qué
+    normativa aplica a esta sección?"), no la de la Vía 2 ("¿alguna sección cubre este
+    artículo?"). Esa segunda pregunta es la que resuelve `manual_index.ManualIndex`
+    (ver su docstring: existe justo para no heredar de `NormativaIndex` lo que no
+    aplica). Además pasaba `config.vector_store_spec`, un campo que `ServiceConfig`
+    nunca declaró — `AttributeError` inmediato en cualquier corrida en modo dual.
+    `construir_indice()` (Vía 1, arriba) tampoco pasa vector_store_spec explícito;
+    se mantiene la misma convención aquí, dejando que `ManualIndex` use su default
+    (`Provider.FAISS_LOCAL`).
+    """
     backend = construir_backend_embeddings(config)
-    from .search_engine import NormativaIndex
-    indice = NormativaIndex(
-        backend,
-        use_reranker=config.use_reranker,
-        reranker_model=config.reranker_model,
-        vector_store_spec=config.vector_store_spec,
-    )
+    from .manual_index import ManualIndex
+    indice = ManualIndex(backend)
     col = "embed_text" if "embed_text" in manual_df.columns else "texto"
     indice.build(manual_df, text_col=col)
     return indice

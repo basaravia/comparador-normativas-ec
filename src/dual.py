@@ -22,10 +22,12 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Callable, Optional
 
 import pandas as pd
 
+from .errors import AnalysisParseError
 from .coverage import (
     ORIGEN_LEXICO,
     ORIGEN_LEXICO_AMBIGUO,
@@ -103,12 +105,26 @@ def _links_desde_via1(
     lexicos: list[dict],
     graduados: list[dict],
     workspace_id: str,
+    analysis=None,
 ) -> list[CoverageLink]:
-    """Aristas que produce analizar una sección."""
+    """Aristas que produce analizar una sección.
+
+    `analysis` (`llm_grader.ComparisonResult`, opcional) es el veredicto de
+    `analyze_comparison()` para TODA la sección — no por candidato — así que se
+    replica igual en cada arista que produce esta sección. Antes `run_dual()` nunca
+    llamaba a `analyze_comparison()` (solo a `grade_candidates()`, que filtra
+    relevancia pero no analiza cumplimiento), así que `nivel_cumplimiento`,
+    `analisis_general` y `brechas` quedaban vacíos en todo el modo dual — el papel de
+    trabajo (ítem 9) mostraba la Vía 1 sin veredicto de cumplimiento.
+    """
     enlaces = []
     chunk_id = str(seccion.get("chunk_id", ""))
     jerarquia = str(seccion.get("jerarquia", ""))
     doc_seccion = str(seccion.get("doc_id", ""))
+
+    nivel_cumplimiento = analysis.nivel_cumplimiento if analysis else None
+    analisis_general = analysis.analisis_general if analysis else ""
+    brechas = tuple(analysis.brechas) if analysis else ()
 
     for m in lexicos:
         ambiguo = m.get("match_type") == "ambiguo"
@@ -127,6 +143,9 @@ def _links_desde_via1(
             razon=m.get("razon_match", "") or "cita explícita del artículo",
             requiere_revision=ambiguo,
             motivos_revision=(MOTIVO_CITA_AMBIGUA,) if ambiguo else (),
+            nivel_cumplimiento=nivel_cumplimiento,
+            analisis_general=analisis_general,
+            brechas=brechas,
         ))
 
     for c in graduados:
@@ -148,6 +167,9 @@ def _links_desde_via1(
             motivos_revision=(
                 (c.get("motivo_revision"),) if c.get("motivo_revision") else ()
             ),
+            nivel_cumplimiento=nivel_cumplimiento,
+            analisis_general=analisis_general,
+            brechas=brechas,
         ))
     return enlaces
 
@@ -160,7 +182,7 @@ def _links_desde_via2(
 ) -> list[CoverageLink]:
     """Aristas que produce analizar un artículo."""
     relevantes = set(getattr(veredicto, "secciones_relevantes", []) or [])
-    cubierto = getattr(veredicto, "nivel_adopcion", "") in ("cubierto", "parcial")
+    nivel_adopcion = getattr(veredicto, "nivel_adopcion", None)
 
     return [
         CoverageLink(
@@ -173,10 +195,16 @@ def _links_desde_via2(
             seccion_jerarquia=str(s.get("jerarquia", "")),
             origen=ORIGEN_SEMANTICO_V2,
             score_semantico=s.get("similarity"),
-            # Solo se afirma la arista si el modelo nombró esa sección, o si el veredicto
-            # global es de cobertura. Marcar todas las candidatas como relevantes
-            # convertiría la recuperación en un veredicto, que es el error del ítem 4.
-            relevante=True if (str(s.get("jerarquia", "")) in relevantes or cubierto) else None,
+            nivel_adopcion=nivel_adopcion,
+            # Solo se afirma la arista si el modelo nombró esa sección explícitamente.
+            # Antes también se marcaba True cuando el veredicto GLOBAL del artículo era
+            # "cubierto"/"parcial" (`or cubierto`), sin importar si esa sección concreta
+            # fue de las que el modelo citó — exactamente el error que este mismo
+            # comentario dice evitar: un artículo con 5 candidatas y una sola sección
+            # nombrada marcaba las 5 como relevantes, inflando la cobertura con falsos
+            # positivos. Sin evidencia de esa sección puntual, queda None (sin evaluar),
+            # no True.
+            relevante=True if str(s.get("jerarquia", "")) in relevantes else None,
             razon=getattr(veredicto, "analisis_adopcion", "")[:200],
         )
         for s in secciones
@@ -203,6 +231,12 @@ def run_dual(
     tabla = LinkTable()
     cache = CacheGrading()
     grader = comparador.grader
+    # Respaldo para vista_manual(): secciones sin ninguna arista (sin lexicos ni
+    # candidatos graduados) no tienen de dónde leer nivel_cumplimiento/analisis_general
+    # —viven en CoverageLink, y sin aristas no hay ningún link— aunque
+    # analyze_comparison() sí corrió y sí produjo un veredicto ("ninguna" → omisión o
+    # sección sin norma aplicable). Se guarda aparte, por chunk_id, para ese caso.
+    analisis_via1: dict[str, dict] = {}
 
     # ── Vía 1 · sección → artículos ───────────────────────────────────────
     secciones = manual_df.to_dict("records")
@@ -221,7 +255,33 @@ def run_dual(
         for c in graduados:
             cache.guardar(str(c.get("element_id", "")), str(seccion.get("chunk_id", "")), c)
 
-        tabla.extend(_links_desde_via1(seccion, lexicos, graduados, workspace_id))
+        # Igual que `_process_row` en comparator.py (Vía única): solo cuentan como
+        # "validados" los candidatos con `relevante is True`, nunca truthiness — un
+        # candidato indeterminado (`None`) no es un candidato descartado ni uno
+        # confirmado, y tratarlo como validado es el mismo defecto del ítem 4.
+        validados = [c for c in graduados if c.get("relevante") is True]
+        try:
+            analysis = grader.analyze_comparison(seccion, lexicos, validados)
+        except AnalysisParseError as e:
+            # A diferencia de grade_candidates() (tres niveles de reintento antes de
+            # rendirse), analyze_comparison() no reintenta — un JSON que no parsea
+            # aquí lanza directo. Degradar esta sección sola, no abortar `run_dual()`
+            # entero: es el mismo criterio del ítem 1 (infraestructura aborta,
+            # contenido degrada), y sin este `except` una sola sección con salida
+            # rara tumbaba las dos vías completas por un fallo que es de esa fila.
+            logger.error("Análisis no parseable en Vía 1 para sección %s: %s",
+                         seccion.get("chunk_id"), e)
+            analysis = SimpleNamespace(nivel_cumplimiento=None, analisis_general="", brechas=())
+
+        enlaces_seccion = _links_desde_via1(seccion, lexicos, graduados, workspace_id, analysis)
+        tabla.extend(enlaces_seccion)
+        if not enlaces_seccion:
+            chunk_id = str(seccion.get("chunk_id", ""))
+            analisis_via1[chunk_id] = {
+                "nivel_cumplimiento": analysis.nivel_cumplimiento,
+                "analisis_general": analysis.analisis_general,
+                "brechas": tuple(analysis.brechas),
+            }
         if progress_callback:
             progress_callback("via1", i, len(secciones))
 
@@ -259,7 +319,7 @@ def run_dual(
     cobertura = cobertura_global(tabla, normativa_df, incluir_referencias)
     bundle = ComparisonBundle(
         links=tabla,
-        vista_manual=vista_manual(tabla, manual_df),
+        vista_manual=vista_manual(tabla, manual_df, analisis_por_seccion=analisis_via1),
         vista_normativa=vista_normativa(tabla, normativa_df, incluir_referencias),
         cobertura=cobertura,
         metadatos={

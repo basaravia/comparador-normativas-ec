@@ -70,14 +70,34 @@ class ModelNotFoundError(LLMUnavailableError):
         return base
 
 
-class ProviderConfigError(ComparadorError):
+class ProviderConfigError(LLMUnavailableError):
     """Faltan credenciales o parámetros del proveedor. Aborta antes de gastar un token.
 
     La usa el ítem P-a; vive aquí para que la taxonomía esté en un solo sitio.
+
+    Hereda de `LLMUnavailableError`, no de `ComparadorError` directo. Antes no lo
+    hacía, y `DocumentComparator.run()` (`comparator.py`) solo aborta de inmediato
+    cuando `isinstance(error, LLMUnavailableError)` — con una credencial vencida o
+    revocada, cada llamada al LLM devolvía 401/403, `classify_llm_exception()` lo
+    mapeaba correctamente a `ProviderConfigError` (ver `nombre in
+    ("AuthenticationError", "PermissionDeniedError", ...)` más abajo), pero al no ser
+    subclase de `LLMUnavailableError`, `run()` lo trataba como fallo de **contenido**:
+    degradaba la fila, quemaba los tres niveles de reintento de
+    `_graduar_con_reintentos()` y solo abortaba tras `max_fallos_consecutivos` filas —
+    exactamente lo contrario de lo que dice este mismo docstring ("Aborta antes de
+    gastar un token").
     """
 
-    def __init__(self, mensaje: str, *, faltantes: list[str] | None = None) -> None:
-        super().__init__(mensaje)
+    def __init__(
+        self,
+        mensaje: str,
+        *,
+        faltantes: list[str] | None = None,
+        modelo: str | None = None,
+        url: str | None = None,
+        causa: BaseException | None = None,
+    ) -> None:
+        super().__init__(mensaje, modelo=modelo, url=url, causa=causa)
         self.faltantes = faltantes or []
 
 

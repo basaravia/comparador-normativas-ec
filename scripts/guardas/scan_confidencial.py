@@ -19,6 +19,7 @@ Un escáner que falla en silencio es peor que no tenerlo.
 """
 from __future__ import annotations
 
+import io
 import json
 import os
 import re
@@ -60,17 +61,24 @@ ZIP_XML = {".xlsx", ".docx", ".pptx", ".odt", ".ods"}
 
 
 # ── extracción de texto ───────────────────────────────────────────────────────
+#
+# Todo aquí opera sobre `bytes` ya resueltos por `_leer_bytes()`, nunca sobre un
+# `Path` que se lee directo del disco. La razón es TOCTOU: para --staged y --push
+# lo que importa es el contenido que *va a quedar commiteado/subido* — el blob del
+# índice o del commit — no el archivo del working tree, que puede haberse editado
+# después de `git add` sin volver a stagearlo. Escanear el working tree ahí daba un
+# "limpio" que no correspondía a lo que realmente se iba a commitear/pushear.
 
-def _texto_plano(p: Path) -> str:
-    return p.read_text(encoding="utf-8", errors="ignore")
+def _texto_plano(datos: bytes) -> str:
+    return datos.decode("utf-8", errors="ignore")
 
 
-def _texto_notebook(p: Path) -> str:
+def _texto_notebook(datos: bytes) -> str:
     """Fuente Y salidas. Las salidas son el vector de mayor volumen en este repo."""
     try:
-        nb = json.loads(p.read_text(encoding="utf-8", errors="ignore"))
+        nb = json.loads(datos.decode("utf-8", errors="ignore"))
     except Exception:
-        return _texto_plano(p)
+        return _texto_plano(datos)
     partes = []
     for celda in nb.get("cells", []):
         partes.append("".join(celda.get("source", [])))
@@ -79,42 +87,75 @@ def _texto_notebook(p: Path) -> str:
     return "\n".join(partes)
 
 
-def _texto_zip_xml(p: Path) -> str:
+def _texto_zip_xml(datos: bytes) -> str:
     """xlsx/docx/pptx son ZIP con XML dentro. Sin dependencias externas."""
     partes = []
-    with zipfile.ZipFile(p) as z:
+    with zipfile.ZipFile(io.BytesIO(datos)) as z:
         for n in z.namelist():
             if n.endswith(".xml") or n.endswith(".rels"):
                 partes.append(re.sub(r"<[^>]+>", " ", z.read(n).decode("utf-8", "ignore")))
     return re.sub(r"\s+", " ", " ".join(partes))
 
 
-def _texto_pdf(p: Path) -> str:
+def _texto_pdf(datos: bytes) -> str:
     try:
         from pypdf import PdfReader
     except ImportError:
         raise RuntimeError("pypdf no disponible; PDF no escaneable")
-    return "\n".join((pg.extract_text() or "") for pg in PdfReader(str(p)).pages)
+    return "\n".join((pg.extract_text() or "") for pg in PdfReader(io.BytesIO(datos)).pages)
 
 
-def extraer(p: Path, limite_mb: float = 5.0) -> tuple[str | None, str | None]:
+# Un PDF escaneado (imagen sin capa de texto) da "" tras la extracción — no es lo
+# mismo que "se extrajo y no hay coincidencias": es que no se pudo mirar el contenido
+# en absoluto. Antes eso se contaba como escaneado y limpio; el caso donde más
+# importa revisar a mano (un documento en imagen) pasaba sin ninguna advertencia.
+_PDF_TEXTO_MINIMO = 20
+
+
+def _leer_bytes(ruta: str, modo: str) -> bytes:
+    """Contenido real a escanear según el modo — ver el docstring de arriba.
+
+    - "staged": el blob en el índice (`git show :ruta`), lo que quedaría commiteado.
+    - "push": el blob en HEAD (`git show HEAD:ruta`), lo que ya está commiteado y a
+      punto de subirse — no el working tree, que puede ir por delante de HEAD.
+    - cualquier otro modo ("árbol rastreado", "archivos indicados"): filesystem,
+      donde no hay una distinción índice/commit que proteger.
+    """
+    if modo == "staged":
+        r = subprocess.run(["git", "show", f":{ruta}"], capture_output=True, cwd=REPO)
+    elif modo == "push":
+        r = subprocess.run(["git", "show", f"HEAD:{ruta}"], capture_output=True, cwd=REPO)
+    else:
+        return (REPO / ruta).read_bytes()
+    if r.returncode != 0:
+        raise RuntimeError(f"git show falló para {ruta!r}: {r.stderr.decode('utf-8', 'ignore').strip()}")
+    return r.stdout
+
+
+def extraer(ruta: str, modo: str, limite_mb: float = 5.0) -> tuple[str | None, str | None]:
     """Devuelve (texto, motivo_no_escaneable)."""
-    ext = p.suffix.lower()
-    mb = p.stat().st_size / (1024 * 1024)
+    ext = Path(ruta).suffix.lower()
+    try:
+        datos = _leer_bytes(ruta, modo)
+    except Exception as e:
+        return None, f"{type(e).__name__}: {e}"
+    mb = len(datos) / (1024 * 1024)
     if mb > limite_mb:
         # Un hook tiene que ser rápido; por encima del límite no se intenta.
         return None, f"demasiado grande ({mb:.1f} MB > {limite_mb} MB)"
     try:
         if ext == ".ipynb":
-            return _texto_notebook(p), None
+            return _texto_notebook(datos), None
         if ext in ZIP_XML:
-            return _texto_zip_xml(p), None
+            return _texto_zip_xml(datos), None
         if ext == ".pdf":
-            return _texto_pdf(p), None
+            texto = _texto_pdf(datos)
+            if len(texto.strip()) < _PDF_TEXTO_MINIMO:
+                return None, "PDF sin texto extraíble (posible escaneo/imagen) — requiere revisión manual"
+            return texto, None
         if ext in TEXTO or not ext:
-            return _texto_plano(p), None
+            return _texto_plano(datos), None
         # Desconocida: intenta como texto; si es binario real, no insistas.
-        datos = p.read_bytes()
         if b"\x00" in datos[:4096]:
             return None, f"binario ({ext or 'sin extensión'})"
         return datos.decode("utf-8", "ignore"), None
@@ -206,8 +247,21 @@ def revisar_rutas(rutas: list[str], dl: dict) -> list:
 
 # ── selección de archivos ─────────────────────────────────────────────────────
 
-def _git(*args) -> list[str]:
+def _git(*args, ignorar_error: bool = False) -> list[str]:
+    """Ejecuta git y devuelve sus líneas de salida.
+
+    Fail-closed por defecto: antes, un comando de git que fallara (rango sin fetchear,
+    upstream inexistente, lo que sea) devolvía `[]` en silencio — `main()` interpretaba
+    eso como "0 archivos a revisar" y el push/commit pasaba sin haberse escaneado nada,
+    justo lo contrario de lo que dice el docstring del módulo. `ignorar_error=True` es
+    solo para la búsqueda de upstream de abajo, que YA tiene un fallback explícito
+    (`or ["origin/main"]`) para el caso en que fallar es esperado.
+    """
     r = subprocess.run(["git", *args], capture_output=True, text=True, cwd=REPO)
+    if r.returncode != 0 and not ignorar_error:
+        print(f"ERROR: 'git {' '.join(args)}' falló: {r.stderr.strip()}", file=sys.stderr)
+        print("No se puede determinar qué escanear. Se aborta (fail-closed).", file=sys.stderr)
+        sys.exit(2)
     return [linea for linea in r.stdout.splitlines() if linea.strip()]
 
 
@@ -224,7 +278,7 @@ def archivos(argv: list[str]) -> tuple[list[str], str, bool]:
     if "--all" in argv:
         return _git("ls-files"), "árbol rastreado", True
     if "--push" in argv:
-        base = _git("rev-parse", "--abbrev-ref", "@{u}") or ["origin/main"]
+        base = _git("rev-parse", "--abbrev-ref", "@{u}", ignorar_error=True) or ["origin/main"]
         rango = f"{base[0]}...HEAD"
         return _git("diff", "--name-only", "--diff-filter=ACMR", rango), f"por subir ({rango})", True
     return [a for a in argv if not a.startswith("-")], "archivos indicados", False
@@ -247,16 +301,21 @@ def main() -> int:
     bloq, adv, sin_escanear, n = [], [], [], 0
     adv += revisar_rutas(rutas, dl)
 
+    # "staged"/"push" leen el blob de git (índice/HEAD), no el filesystem — ver
+    # _leer_bytes(). El chequeo de existencia en disco (p.is_file()) solo aplica a
+    # los otros modos; para esos dos, un blob ausente lo reporta extraer() como
+    # excepción y cae en sin_escanear, no se filtra aquí antes de mirarlo.
+    modo_lectura = "staged" if "--staged" in sys.argv else ("push" if "--push" in sys.argv else "fs")
+
     for ruta in rutas:
         if aplicar_exclusiones and ignorado(ruta, dl):
             continue
-        p = REPO / ruta
-        if not p.is_file():
+        if modo_lectura == "fs" and not (REPO / ruta).is_file():
             continue
-        if p.suffix.lower() in no_escan:
+        if Path(ruta).suffix.lower() in no_escan:
             sin_escanear.append((ruta, "tipo no inspeccionable como texto"))
             continue
-        texto, motivo = extraer(p, dl["no_escaneables"].get("limite_tamano_mb", 5))
+        texto, motivo = extraer(ruta, modo_lectura, dl["no_escaneables"].get("limite_tamano_mb", 5))
         if texto is None:
             sin_escanear.append((ruta, motivo))
             continue

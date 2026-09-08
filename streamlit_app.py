@@ -454,7 +454,13 @@ with tab_compare:
             clear_log_lines()
             total = len(selected_manual_df)
 
-            cfg = service.ServiceConfig.desde_dict(config)
+            # `svc_cfg`, no `cfg`: el módulo `cfg` (src.config, importado arriba como
+            # `from src import config as cfg`) se usa en todo este archivo — llamar
+            # `cfg` a esta instancia de ServiceConfig lo tapaba en este scope, y el
+            # `except RunAbortedError` de abajo (que sí necesita `cfg.VERTEX_PROJECT_ID`,
+            # el módulo) reventaba con AttributeError en la fila que menos podía
+            # permitírselo: la que muestra el diagnóstico de una corrida abortada.
+            svc_cfg = service.ServiceConfig.desde_dict(config)
             rutas = service.RunPaths(run_id=service.nuevo_run_id())
             st.session_state["run_id"] = rutas.run_id
             handle = RunHandle(run_id=rutas.run_id, total=total, config_hash=cfg_hash)
@@ -474,13 +480,13 @@ with tab_compare:
                 handle.estado = EstadoCorrida.CORRIENDO
                 bundle = None
                 if dual_mode:
-                    manual_idx = service.construir_indice_manual(selected_manual_df, cfg)
+                    manual_idx = service.construir_indice_manual(selected_manual_df, svc_cfg)
                     bundle = service.comparar_dual(
                         indice_normativa=st.session_state["normativa_index"],
                         indice_manual=manual_idx,
                         manual_df=selected_manual_df,
                         normativa_df=selected_normativa_df,
-                        config=cfg,
+                        config=svc_cfg,
                         min_score=config.get("min_semantic_score", 0.30),
                         top_k=config.get("faiss_top_k", 5),
                         incluir_referencias=(preset_art == "Todo el articulado"),
@@ -493,7 +499,7 @@ with tab_compare:
                         st.session_state["normativa_index"],
                         selected_manual_df,
                         selected_normativa_df,
-                        cfg,
+                        svc_cfg,
                         progress_callback=_on_progress,
                         desc=mode,
                         cancelar=handle.cancelar,
@@ -532,6 +538,19 @@ with tab_compare:
                 # mensaje tiene que ser accionable —qué modelo, qué endpoint, cuánto
                 # quedó sin analizar— porque antes esto se presentaba como un resultado
                 # completo lleno de "no aplica" (ítem 1).
+                #
+                # `handle.estado` tiene que pasar a un estado terminal aquí — antes se
+                # quedaba en CORRIENDO para siempre. `RunHandle.viva` es `not
+                # estado.terminal`, y `activa_con_config(cfg_hash)` (más abajo, botón
+                # "Ejecutar") usa eso para bloquear una segunda corrida con la misma
+                # config: cualquier fallo transitorio (timeout de Vertex, un blip de
+                # red) dejaba el botón deshabilitado para siempre hasta reiniciar el
+                # proceso de Streamlit. Mismo criterio que `RunManager.lanzar()`
+                # (app/run_manager.py): CANCELADO si el usuario pidió detenerla,
+                # FALLIDO en cualquier otro caso.
+                handle.estado = (
+                    EstadoCorrida.CANCELADO if handle.cancelar.is_set() else EstadoCorrida.FALLIDO
+                )
                 logger.error("Comparación abortada: %s", e)
                 st.error(
                     f"**Corrida detenida.** {e.completadas} de {e.total} secciones "
@@ -548,6 +567,7 @@ with tab_compare:
                     st.session_state["results_df"] = e.parciales
                     st.session_state["run_parcial"] = True
             except Exception as e:
+                handle.estado = EstadoCorrida.FALLIDO
                 logger.error("Comparación interrumpida: %s", e)
                 st.error(f"Error durante la comparación: {e}")
             finally:
