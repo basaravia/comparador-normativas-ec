@@ -54,6 +54,13 @@ NIVEL_ORDER = ["cumple", "parcial", "omision", "no_aplica"]
 # puerto por defecto de `streamlit run`.
 APP_PORT = int(os.getenv("DATABRICKS_APP_PORT", "8501"))
 
+# Mismo env var, para decisiones de configuración por defecto: en Databricks Apps no
+# hay Docker Model Runner/Ollama alcanzable (es un endpoint de Docker Desktop en el
+# host de desarrollo), así que el backend de embeddings por defecto tiene que ser uno
+# que exista fuera de una laptop — Vertex AI. Fuera de Databricks Apps se conserva el
+# comportamiento de siempre (DMR primero, es lo que hay corriendo en desarrollo).
+IS_DATABRICKS_APPS = "DATABRICKS_APP_PORT" in os.environ
+
 inject_theme()
 setup_logging()
 logger.info("Arrancando streamlit_app.py — puerto esperado: %d", APP_PORT)
@@ -112,9 +119,13 @@ def _sidebar_config() -> dict:
     )
 
     st.sidebar.markdown("#### Embeddings")
+    embed_opciones = ["Docker Model Runner", "Local (sentence-transformers)", "Vertex AI"]
+    # En Databricks Apps no hay DMR/Ollama alcanzable — Vertex AI es el único backend
+    # de embeddings que funciona ahí sin configuración adicional (ver IS_DATABRICKS_APPS).
     embed_backend_kind = st.sidebar.radio(
         "Backend de embeddings",
-        ["Docker Model Runner", "Local (sentence-transformers)"],
+        embed_opciones,
+        index=embed_opciones.index("Vertex AI") if IS_DATABRICKS_APPS else 0,
         key="cfg_embed_backend",
     )
     embed_model = st.sidebar.selectbox(
@@ -124,6 +135,11 @@ def _sidebar_config() -> dict:
         key="cfg_embed_model_select",
         disabled=embed_backend_kind != "Docker Model Runner",
     )
+    if embed_backend_kind == "Vertex AI":
+        st.sidebar.caption(
+            f"Modelo: `{cfg.VERTEX_EMBED_MODEL}` · región: `{cfg.VERTEX_EMBED_LOCATION}` — "
+            "requiere GOOGLE_APPLICATION_CREDENTIALS en el entorno."
+        )
     if embed_model == "Personalizado…":
         embed_model = st.sidebar.text_input(
             "Modelo de embedding (custom)", value=cfg.DMR_EMBED_MODEL, key="cfg_embed_model_custom"

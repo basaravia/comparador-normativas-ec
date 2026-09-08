@@ -14,8 +14,26 @@ langchain-openai>=0.3.0
 httpx>=0.27.0
 openai>=1.50.0
 
+# Vertex AI — proveedor por defecto del LLM de grading (Provider.VERTEX,
+# ver streamlit_app.py) y del backend de embeddings en Databricks Apps (no hay
+# Docker Model Runner/Ollama ahí). Sin este paquete, ChatVertexAI/VertexAIEmbeddings
+# fallan con ImportError al primer uso — no existía en ningún requirements del
+# repo pese a ser la ruta por defecto; estaba instalado ad hoc en el .venv local.
+langchain-google-vertexai>=2.1.0
+
 # Vector search
 faiss-cpu>=1.8.0
+
+# Document parsing (tabulación, Paso 1) — autoservicio completo dentro de la App.
+# torch/docling son pesados (varios GB) pero Databricks Apps es el único lugar
+# donde corre este pipeline hoy: no hay job/notebook aparte que tabule y deje un
+# artefacto para que la App solo lea.
+docling==2.55.1
+langchain-docling==1.1.0
+torch>=2.5.0
+torchvision>=0.20.0
+transformers>=4.50.0
+sentence-transformers>=3.0.0    # embeddings locales (LOCAL_ST) y reranker CrossEncoder
 
 # Data & Numerical
 pandas>=2.0.0

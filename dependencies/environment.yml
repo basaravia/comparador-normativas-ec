@@ -31,6 +31,12 @@ dependencies:
       - openai==1.109.1
       - httpx>=0.27.0                # cliente HTTP para el endpoint /rerank de DMR
 
+      # Vertex AI — Provider.VERTEX es el LLM por defecto (ChatVertexAI) y el
+      # backend de embeddings validado como alternativa a DMR (VertexAIEmbeddings,
+      # ver src/providers.py). No estaba declarado en ningún requirements del
+      # repo; sin él, ChatVertexAI falla con ImportError al primer uso.
+      - langchain-google-vertexai>=2.1.0
+
       # ── Vector search ──────────────────────────────────────────────────
       - faiss-cpu==1.14.2            # no existe faiss-gpu para Apple Silicon
 

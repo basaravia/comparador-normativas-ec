@@ -12,6 +12,13 @@ langchain-text-splitters==0.3.11
 openai==1.109.1                 # cliente base usado por langchain-openai
 httpx>=0.27.0                   # cliente HTTP para llamadas al reranker DMR
 
+# ── Vertex AI ─────────────────────────────────────────────────────────────────
+# Provider.VERTEX: LLM de grading por defecto (ChatVertexAI) y backend de
+# embeddings validado (VertexAIEmbeddings). No estaba declarado aquí ni en
+# ningún otro requirements — instalado ad hoc en el .venv, ImportError en un
+# entorno nuevo (incluido Databricks Apps) al primer uso.
+langchain-google-vertexai>=2.1.0
+
 # ── Vector search ─────────────────────────────────────────────────────────────
 faiss-cpu==1.14.2               # IndexFlatIP para búsqueda coseno; no hay faiss-gpu en Apple Silicon
 

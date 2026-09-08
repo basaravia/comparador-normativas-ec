@@ -114,6 +114,11 @@ class TestServiceConfig:
         assert ServiceConfig.desde_dict({"embed_backend_kind": "Docker Model Runner"}) \
             .embed_backend_kind == "remoto"
 
+    def test_traduce_vertex_ai(self):
+        """Único backend de embeddings alcanzable en Databricks Apps (sin DMR/Ollama)."""
+        assert ServiceConfig.desde_dict({"embed_backend_kind": "Vertex AI"}) \
+            .embed_backend_kind == "vertex"
+
 
 class TestExportar:
 

@@ -71,7 +71,7 @@ class ServiceConfig:
     llm_model: str | None = None
     embed_model: str | None = None
     base_url: str | None = None
-    embed_backend_kind: str = "remoto"        # "remoto" | "local"
+    embed_backend_kind: str = "remoto"        # "remoto" | "local" | "vertex"
 
     # Búsqueda
     faiss_top_k: int = FAISS_TOP_K
@@ -108,6 +108,8 @@ class ServiceConfig:
             conocidas.setdefault("base_url", d["dmr_base_url"])
         if d.get("embed_backend_kind", "").startswith("Local"):
             conocidas["embed_backend_kind"] = "local"
+        elif d.get("embed_backend_kind", "").startswith("Vertex"):
+            conocidas["embed_backend_kind"] = "vertex"
         elif "embed_backend_kind" in d:
             conocidas["embed_backend_kind"] = "remoto"
         return cls(**conocidas, extra={k: v for k, v in d.items() if k not in campos})
@@ -175,6 +177,8 @@ def construir_backend_embeddings(config: ServiceConfig):
     if config.embed_backend_kind == "local":
         spec = ProviderSpec(proveedor=Provider.LOCAL_ST, device=config.device,
                             batch_size=config.embed_batch_size)
+    elif config.embed_backend_kind == "vertex":
+        spec = ProviderSpec(proveedor=Provider.VERTEX, batch_size=config.embed_batch_size)
     else:
         spec = ProviderSpec(proveedor=Provider.OPENAI_COMPAT, modelo=config.embed_model,
                             base_url=config.base_url, batch_size=config.embed_batch_size)
