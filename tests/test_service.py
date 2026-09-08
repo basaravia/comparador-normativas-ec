@@ -119,6 +119,15 @@ class TestServiceConfig:
         assert ServiceConfig.desde_dict({"embed_backend_kind": "Vertex AI"}) \
             .embed_backend_kind == "vertex"
 
+    def test_llm_backend_default_es_vertex(self):
+        assert ServiceConfig.desde_dict({"llm_backend_kind": "Vertex AI"}) \
+            .llm_backend_kind == "vertex"
+
+    def test_traduce_openrouter(self):
+        """Backend gratuito sin cuenta de nube — ver construir_comparador()."""
+        assert ServiceConfig.desde_dict({"llm_backend_kind": "OpenRouter (gratis)"}) \
+            .llm_backend_kind == "openrouter"
+
 
 class TestExportar:
 

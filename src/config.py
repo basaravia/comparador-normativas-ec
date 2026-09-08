@@ -80,6 +80,16 @@ OLLAMA_BASE_URL: str = "http://localhost:11434/v1"
 OLLAMA_EMBED_MODEL: str = "qwen3-embedding:0.6b"
 OLLAMA_EMBED_DIM: int = 1024
 
+# ── OpenRouter (LLM — alternativa gratuita, sin cuenta de nube) ─────────────
+# Vía Provider.DMR (openai-compat genérico, ver providers.py): OpenRouter expone la
+# misma API que OpenAI, solo cambia base_url + api_key. Sin default de modelo a
+# propósito — el catálogo de modelos `:free` rota (confirmado por búsqueda web,
+# septiembre 2026): hornear un ID aquí es apuntar a un modelo que puede dejar de
+# existir. Elegir uno vivo en https://openrouter.ai/models?max_price=0 y pegarlo en
+# el sidebar o en OPENROUTER_LLM_MODEL.
+OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
+OPENROUTER_LLM_MODEL: str = ""
+
 # ── Alias DMR_* ─────────────────────────────────────────────────────────────
 # `embeddings.py`, `llm_grader.py`, `service.py`, `streamlit_app.py` y `master.ipynb`
 # importan estos nombres. Se conservan (en vez de renombrarlos en cada sitio) para que

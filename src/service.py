@@ -42,6 +42,7 @@ from .config import (
     LLM_TEMPERATURE,
     MAX_WORKERS,
     MIN_SEMANTIC_SCORE,
+    OPENROUTER_BASE_URL,
     RERANKER_MODEL,
     RERANKER_TOP_N,
 )
@@ -72,6 +73,9 @@ class ServiceConfig:
     embed_model: str | None = None
     base_url: str | None = None
     embed_backend_kind: str = "remoto"        # "remoto" | "local" | "vertex"
+    llm_backend_kind: str = "vertex"          # "vertex" | "openrouter"
+    llm_base_url: str | None = None
+    llm_api_key: str | None = None
 
     # Búsqueda
     faiss_top_k: int = FAISS_TOP_K
@@ -112,6 +116,10 @@ class ServiceConfig:
             conocidas["embed_backend_kind"] = "vertex"
         elif "embed_backend_kind" in d:
             conocidas["embed_backend_kind"] = "remoto"
+        if d.get("llm_backend_kind", "").startswith("OpenRouter"):
+            conocidas["llm_backend_kind"] = "openrouter"
+        elif "llm_backend_kind" in d:
+            conocidas["llm_backend_kind"] = "vertex"
         return cls(**conocidas, extra={k: v for k, v in d.items() if k not in campos})
 
 
@@ -242,18 +250,33 @@ def construir_indice(normativa_df: pd.DataFrame, config: ServiceConfig) -> Norma
 def construir_comparador(indice: NormativaIndex, config: ServiceConfig) -> DocumentComparator:
     """Arma el grader y el comparador. Único sitio donde se cablean sus parámetros.
 
-    El LLM de análisis va por `Provider.VERTEX`, no por la firma clásica
+    El LLM de análisis va por `Provider.VERTEX` por defecto, no por la firma clásica
     (`model=`/`base_url=`) de `LLMGrader`: esa firma construye siempre un cliente
-    `Provider.DMR` (openai-compat), y en esta rama el LLM no vive ahí — vive en Vertex
+    `Provider.DMR` (openai-compat), y por defecto el LLM no vive ahí — vive en Vertex
     AI, con su propia auth (ADC). `config.llm_model=None` deja que `ProviderSpec.resuelto()`
     resuelva `VERTEX_LLM_MODEL` desde entorno/default, igual que ya hacía para DMR.
+
+    `llm_backend_kind="openrouter"` reutiliza el mismo `Provider.DMR` (openai-compat
+    genérico) que ya usan los embeddings locales — OpenRouter expone la API de OpenAI,
+    solo cambian `base_url`/`api_key`. No hace falta un Provider nuevo.
     """
-    grader = LLMGrader(
-        spec=ProviderSpec(
+    if config.llm_backend_kind == "openrouter":
+        spec = ProviderSpec(
+            proveedor=Provider.DMR,
+            modelo=config.llm_model,
+            base_url=config.llm_base_url or OPENROUTER_BASE_URL,
+            temperature=config.temperature,
+            api_key=config.llm_api_key,
+            clave_env="OPENROUTER_API_KEY",
+        )
+    else:
+        spec = ProviderSpec(
             proveedor=Provider.VERTEX,
             modelo=config.llm_model,
             temperature=config.temperature,
-        ),
+        )
+    grader = LLMGrader(
+        spec=spec,
         max_tokens=config.llm_max_tokens,
         grader_max_tokens=config.grader_max_tokens,
     )
