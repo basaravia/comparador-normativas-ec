@@ -114,11 +114,17 @@ class StartCompareResponse(BaseModel):
 
 class RunStatusResponse(BaseModel):
     run_id: str
-    estado: str  # pendiente | corriendo | completado | cancelado | error
+    estado: str  # pendiente | corriendo | completado | cancelado | fallido
     progreso: int
     total: int
     porcentaje: float
     etiqueta: str = ""
+    # Motivo cuando estado == "fallido" (`RunHandle.error`). Antes esta respuesta no
+    # tenía este campo en absoluto: un consumidor de la API (la SPA, un script) veía
+    # "fallido" sin ninguna pista de la causa, mientras la misma corrida vía
+    # Streamlit sí mostraba el error completo con st.error() — dos superficies del
+    # mismo backend con visibilidad distinta del mismo fallo.
+    error: Optional[str] = None
     cobertura_global: Optional[float] = None
     alerta_cobertura: Optional[str] = None
     articulos_sin_cobertura: List[Dict[str, Any]] = Field(default_factory=list)

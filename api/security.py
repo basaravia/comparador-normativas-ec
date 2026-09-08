@@ -31,11 +31,19 @@ from app.auth_core import (
     is_auth_enabled,
     verify_credentials,
 )
+from src import settings as _settings
 
 SESSION_COOKIE_NAME = "auth_session"
 
 # 8 horas: cubre una jornada de auditoría sin dejar sesiones vivas indefinidamente.
-SESSION_TTL_SECONDS = int(os.getenv("AUTH_SESSION_TTL", "28800"))
+#
+# `_settings.cargar_env()` explícito antes de leer, no solo `os.getenv()`: esta
+# constante se calcula una sola vez, al importar el módulo — si algo la lee antes de
+# que cualquier otro código del proceso haya cargado `.env`, un AUTH_SESSION_TTL
+# puesto solo ahí (la convención documentada del proyecto) queda congelado con el
+# default para siempre, sin ninguna llamada posterior que pueda corregirlo.
+_settings.cargar_env()
+SESSION_TTL_SECONDS = _settings.get("AUTH_SESSION_TTL", default=28800, cast=int)
 
 # Clave de proceso si no hay AUTH_SECRET_KEY: las sesiones no sobreviven a un
 # reinicio, que es el comportamiento seguro por defecto para un único worker.
@@ -164,8 +172,15 @@ def cookie_debe_ser_segura(request: Request) -> bool:
 
     `AUTH_COOKIE_SECURE` fuerza el valor cuando hay un proxy TLS delante que
     termina la conexión y habla HTTP con la app (el caso de despliegue típico).
+
+    Vía `_settings.get()` (carga `.env` internamente), no `os.getenv()` directo —
+    mismo motivo que `SESSION_TTL_SECONDS` arriba. El valor sin forzar (`None`) usa
+    su propia lista de verdadero/falso en vez de la de `settings.get(cast=bool)`
+    porque aquí hace falta distinguir tres estados (forzado True / forzado False /
+    sin forzar), y `cast=bool` con un default no distingue "no configurado" de
+    "configurado en falso".
     """
-    forzado = os.getenv("AUTH_COOKIE_SECURE", "").strip().lower()
+    forzado = _settings.get("AUTH_COOKIE_SECURE", default="").strip().lower()
     if forzado in ("1", "true", "yes", "on"):
         return True
     if forzado in ("0", "false", "no", "off"):

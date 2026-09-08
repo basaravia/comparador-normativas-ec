@@ -36,6 +36,14 @@ logger = logging.getLogger(__name__)
 # Cuántas líneas de log se conservan por corrida para el panel en vivo.
 _MAX_LINEAS_LOG = 500
 
+# Cuántas corridas terminales se conservan en memoria. Sin este límite, `_corridas`
+# crece sin cota durante la vida del proceso — cada corrida guarda su propio
+# `resultado` (potencialmente varios DataFrames con texto completo de análisis,
+# brechas, etc.), y en un proceso de larga duración (el servicio FastAPI, no un
+# script de Streamlit que se reinicia a menudo) eso es una fuga de memoria clásica.
+# Las corridas vivas nunca se descartan, sin importar cuántas haya.
+_MAX_CORRIDAS_TERMINALES = 200
+
 
 class EstadoCorrida(str, Enum):
     PENDIENTE = "pendiente"
@@ -133,6 +141,17 @@ class RunManager:
         with self._lock:
             return sorted(self._corridas.values(), key=lambda h: h.iniciado_en, reverse=True)
 
+    def run_ids_conocidos(self) -> set[str]:
+        """IDs de las corridas que este proceso todavía conoce.
+
+        Para que quien mantenga una caché aparte keyed por run_id (p. ej.
+        `api/routers/compare.py::_RUN_BUNDLES`) pueda purgar la suya en el mismo
+        momento en que `_purgar_terminales()` libera una corrida aquí, en vez de
+        crecer sin límite por su cuenta con su propio criterio de retención.
+        """
+        with self._lock:
+            return set(self._corridas.keys())
+
     def activa_con_config(self, config_hash: str) -> RunHandle | None:
         """Corrida viva con la misma configuración.
 
@@ -150,8 +169,25 @@ class RunManager:
     def registrar(self, handle: RunHandle) -> RunHandle:
         with self._lock:
             self._corridas[handle.run_id] = handle
+            self._purgar_terminales()
         self._espejar(handle)
         return handle
+
+    def _purgar_terminales(self) -> None:
+        """Descarta las corridas terminales más antiguas por encima del límite.
+
+        Llamar con el lock ya tomado (`registrar()` es el único llamador). Nunca
+        descarta una corrida viva — `_MAX_CORRIDAS_TERMINALES` acota memoria, no
+        trabajo en curso. El espejo en disco (`output/runs/<run_id>/state.json`)
+        sigue existiendo tras la purga; solo se libera la copia en memoria.
+        """
+        terminales = sorted(
+            (h for h in self._corridas.values() if h.estado.terminal),
+            key=lambda h: h.terminado_en or h.iniciado_en,
+        )
+        exceso = len(terminales) - _MAX_CORRIDAS_TERMINALES
+        for h in terminales[:max(0, exceso)]:
+            del self._corridas[h.run_id]
 
     def lanzar(
         self,

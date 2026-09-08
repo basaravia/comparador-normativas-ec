@@ -1,15 +1,15 @@
-"""Router de estado de salud y catálogo de proveedores de modelos (DMR, Ollama, Vertex, Azure AI Foundry).
+"""Router de estado de salud y catálogo de proveedores de modelos (DMR/Ollama, Vertex).
 """
 from __future__ import annotations
 
 import os
 import platform
-import httpx
 from fastapi import APIRouter
 
 from api.schemas import HealthResponse, ProviderInfo, ProvidersResponse
 from src import config as cfg
-from src.providers import Provider
+from src.model_registry import modelos_disponibles
+from src.providers import Provider, ProviderSpec, resolve_device
 
 router = APIRouter(prefix="/api", tags=["Sistema y Proveedores"])
 
@@ -17,7 +17,13 @@ router = APIRouter(prefix="/api", tags=["Sistema y Proveedores"])
 @router.get("/health", response_model=HealthResponse)
 def get_health() -> HealthResponse:
     """Verifica la operatividad del servicio y plataforma."""
-    device = "cuda" if os.environ.get("CUDA_VISIBLE_DEVICES") else ("mps" if platform.system() == "Darwin" else "cpu")
+    # `resolve_device()`, no una detección propia: antes esto miraba solo
+    # CUDA_VISIBLE_DEVICES/platform.system(), la misma heurística que
+    # providers._cuda_utilizable() existe justo para no usar — is_available()/la
+    # presencia de la variable de entorno no dice si el wheel de torch instalado
+    # trae kernels para la GPU presente (ver el docstring de resolve_device, y el
+    # caso real de esta máquina: GTX 960M, sm_50, wheels recientes sin soporte).
+    device = resolve_device("auto")
     return HealthResponse(
         status="ok",
         version="4.0.0",
@@ -28,20 +34,25 @@ def get_health() -> HealthResponse:
 
 @router.get("/config/providers", response_model=ProvidersResponse)
 def get_providers() -> ProvidersResponse:
-    """Retorna los proveedores disponibles con aceleración GPU local y remota."""
-    # Chequeo rápido de Ollama
-    ollama_ok = False
-    try:
-        r = httpx.get(f"{cfg.DMR_BASE_URL.rstrip('/')}/models", timeout=0.8)
-        ollama_ok = (r.status_code == 200)
-    except Exception:
-        ollama_ok = False
+    """Retorna los proveedores disponibles con aceleración GPU local y remota.
+
+    No hay entrada de Azure AI Foundry: `src/providers.py` (Provider enum) no lo
+    declara a propósito todavía ("declararlas ahora sería prometer un camino que
+    nadie ha recorrido" — no hay suscripción contra la que verificarlo). Esta ruta
+    reportaba antes un `azure_ai_foundry` disponible con solo mirar variables de
+    entorno, sin que exista ningún `Provider.AZURE` ni fábrica en
+    `build_chat_model`/`build_embedding_backend` — seleccionarlo en cualquier punto
+    del pipeline habría lanzado `ProviderConfigError` de inmediato. La API no debe
+    prometer una capacidad que el backend no puede construir.
+    """
+    # Mismo chequeo que usa el resto del pipeline (providers.list_models vía
+    # model_registry), no un GET a mano con su propio timeout y base_url —
+    # duplicarlo aquí es exactamente lo que puede hacer que la API y el pipeline
+    # disientan sobre si Ollama está arriba.
+    ollama_ok = bool(modelos_disponibles(ProviderSpec(proveedor=Provider.DMR, base_url=cfg.DMR_BASE_URL)))
 
     # Chequeo de Vertex AI
     vertex_ok = bool(os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or os.getenv("VERTEX_PROJECT_ID"))
-
-    # Chequeo de Azure AI Foundry
-    azure_ok = bool(os.getenv("AZURE_OPENAI_ENDPOINT") and os.getenv("AZURE_OPENAI_API_KEY"))
 
     providers = [
         ProviderInfo(
@@ -53,17 +64,10 @@ def get_providers() -> ProvidersResponse:
         ),
         ProviderInfo(
             id=Provider.VERTEX.value,
-            nombre="GCP Vertex AI (Gemini 2.5 / 1.5)",
+            nombre="GCP Vertex AI (Gemini)",
             disponible=vertex_ok,
-            tipo="llm",
-            detalles=f"Proyecto: {cfg.VERTEX_PROJECT_ID or 'No configurado'}",
-        ),
-        ProviderInfo(
-            id="azure_ai_foundry",
-            nombre="Azure AI Foundry (OpenAI Models)",
-            disponible=azure_ok,
             tipo="llm / embedding",
-            detalles=f"Endpoint: {os.getenv('AZURE_OPENAI_ENDPOINT', 'No configurado')}",
+            detalles=f"Proyecto: {cfg.VERTEX_PROJECT_ID or 'No configurado'}",
         ),
         ProviderInfo(
             id="sentence_transformers",
