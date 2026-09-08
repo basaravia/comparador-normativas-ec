@@ -2,7 +2,7 @@
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
@@ -104,6 +104,14 @@ class StartCompareRequest(BaseModel):
     top_k: int = 5
     llm_model: Optional[str] = None
     embed_model: Optional[str] = None
+    # Antes de esto, `start_compare()` los recibía pero los ignoraba por completo: la
+    # corrida vía API siempre corría con `ServiceConfig()` por defecto (Vertex), sin
+    # importar lo que este campo llevara. Streamlit ya puede elegir Groq/OpenRouter
+    # desde el sidebar (ver streamlit_app.py) desde que se agregó ese backend — la API
+    # nunca conectó el mismo interruptor. Valores canónicos, no las etiquetas de
+    # presentación del sidebar ('Groq (gratis)'): quien llame a la API no tiene por
+    # qué conocerlas, y así lo valida además el propio esquema OpenAPI.
+    llm_backend_kind: Optional[Literal["vertex", "openrouter", "groq"]] = None
 
 
 class StartCompareResponse(BaseModel):

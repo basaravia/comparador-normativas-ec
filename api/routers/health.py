@@ -10,6 +10,7 @@ from api.schemas import HealthResponse, ProviderInfo, ProvidersResponse
 from src import config as cfg
 from src.model_registry import modelos_disponibles
 from src.providers import Provider, ProviderSpec, resolve_device
+from src.settings import get as get_setting
 
 router = APIRouter(prefix="/api", tags=["Sistema y Proveedores"])
 
@@ -54,6 +55,16 @@ def get_providers() -> ProvidersResponse:
     # Chequeo de Vertex AI
     vertex_ok = bool(os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or os.getenv("VERTEX_PROJECT_ID"))
 
+    # Groq y OpenRouter (LLM openai-compat, ver src/service.py::construir_comparador):
+    # esta ruta no los listaba en absoluto hasta ahora, aunque `src/config.py` ya trae
+    # GROQ_BASE_URL/OPENROUTER_BASE_URL y streamlit_app.py ya deja elegirlos desde el
+    # sidebar — la SPA no tenía forma de saber que existían. `get_setting()`, no
+    # `os.getenv()` a mano: sigue la misma precedencia UI > env > .env > default que
+    # usa `construir_comparador()` para armar el backend real, así esta ruta no le
+    # miente a quién consulte el catálogo sobre una clave que sí está en `.env`.
+    groq_ok = bool(get_setting("GROQ_API_KEY", default=""))
+    openrouter_ok = bool(get_setting("OPENROUTER_API_KEY", default=""))
+
     providers = [
         ProviderInfo(
             id="ollama_dmr",
@@ -68,6 +79,26 @@ def get_providers() -> ProvidersResponse:
             disponible=vertex_ok,
             tipo="llm / embedding",
             detalles=f"Proyecto: {cfg.VERTEX_PROJECT_ID or 'No configurado'}",
+        ),
+        ProviderInfo(
+            id="groq",
+            nombre="Groq (LLM gratuito, hardware propio)",
+            disponible=groq_ok,
+            tipo="llm",
+            detalles=(
+                f"Modelo: {get_setting('GROQ_LLM_MODEL', default=cfg.GROQ_LLM_MODEL) or 'sin configurar'}"
+                if groq_ok else "Falta GROQ_API_KEY"
+            ),
+        ),
+        ProviderInfo(
+            id="openrouter",
+            nombre="OpenRouter (LLM gratuito, agregador)",
+            disponible=openrouter_ok,
+            tipo="llm",
+            detalles=(
+                f"Modelo: {get_setting('OPENROUTER_LLM_MODEL', default=cfg.OPENROUTER_LLM_MODEL) or 'sin configurar'}"
+                if openrouter_ok else "Falta OPENROUTER_API_KEY"
+            ),
         ),
         ProviderInfo(
             id="sentence_transformers",

@@ -43,6 +43,27 @@ def _purgar_cachés_compare() -> None:
                 del cache[run_id]
 
 
+def _service_config_from_request(req: StartCompareRequest) -> service.ServiceConfig:
+    """Traduce `StartCompareRequest` a `ServiceConfig` sin pasar por `desde_dict()`.
+
+    `ServiceConfig.desde_dict()` existe para traducir el dict de etiquetas que arma el
+    sidebar de Streamlit ("Groq (gratis)", "OpenRouter (gratis)", "Vertex AI") — no los
+    valores canónicos que ya trae este schema tipado. Enchufarle `req.model_dump()`
+    directo se ve como un one-liner razonable, pero es un bug silencioso: "groq" u
+    "openrouter" no matchean ningún `.startswith(...)` de esas etiquetas (comparación
+    case-sensitive contra "Groq"/"OpenRouter") y la función cae en su rama por
+    defecto, coercionando cualquier corrida de la API a Vertex sin avisar — el mismo
+    tipo de desalineamiento silencioso que dejó a esta ruta ignorando `llm_model`
+    desde el commit fundacional de `api/`. Construir el dataclass directo evita ese
+    acoplamiento a strings de presentación que la API nunca tuvo.
+    """
+    return service.ServiceConfig(
+        llm_model=req.llm_model,
+        embed_model=req.embed_model,
+        llm_backend_kind=req.llm_backend_kind or "vertex",
+    )
+
+
 def _construir_trabajo(
     run_id: str,
     req: StartCompareRequest,
@@ -169,7 +190,7 @@ def start_compare(req: StartCompareRequest) -> StartCompareResponse:
 
     total_est = len(manual_df)
     handle = RunHandle(run_id=run_id, total=total_est)
-    cfg = service.ServiceConfig()
+    cfg = _service_config_from_request(req)
     trabajo = _construir_trabajo(run_id, req, normativa_df, manual_df, normativa_index, cfg, rutas)
     gestor().lanzar(handle, trabajo)
 
