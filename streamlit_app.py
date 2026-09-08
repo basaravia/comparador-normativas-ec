@@ -176,13 +176,13 @@ def _sidebar_config() -> dict:
     _LLM_OPENAI_COMPAT = {
         "OpenRouter (gratis)": dict(
             base_url=cfg.OPENROUTER_BASE_URL, modelo_default=cfg.OPENROUTER_LLM_MODEL,
-            clave_env="OPENROUTER_API_KEY", nombre="OpenRouter",
+            clave_env="OPENROUTER_API_KEY", modelo_env="OPENROUTER_LLM_MODEL", nombre="OpenRouter",
             ayuda_modelo="elegí uno con sufijo `:free` para no gastar saldo",
             catalogo_url="openrouter.ai/models?max_price=0",
         ),
         "Groq (gratis)": dict(
             base_url=cfg.GROQ_BASE_URL, modelo_default=cfg.GROQ_LLM_MODEL,
-            clave_env="GROQ_API_KEY", nombre="Groq",
+            clave_env="GROQ_API_KEY", modelo_env="GROQ_LLM_MODEL", nombre="Groq",
             ayuda_modelo="todo el catálogo de Groq corre en el tier gratis (con cuota)",
             catalogo_url="console.groq.com/docs/models",
         ),
@@ -225,9 +225,18 @@ def _sidebar_config() -> dict:
         # /models no exige auth para listar en ninguno de los dos — mismo helper que ya
         # usan los embeddings de Docker Model Runner.
         modelos_disp = _modelos_del_backend(llm_base_url)
+        # OPENROUTER_LLM_MODEL / GROQ_LLM_MODEL preseleccionan el modelo elegido en vez de
+        # obligar a buscarlo a mano cada sesión en un catálogo de decenas de entradas — se
+        # antepone aunque el listado en vivo no lo traiga (falla de red, id no listado).
+        modelo_env_val = os.getenv(opc["modelo_env"], "") or opc["modelo_default"]
+        opciones = list(modelos_disp)
+        if modelo_env_val and modelo_env_val not in opciones:
+            opciones = [modelo_env_val] + opciones
+        opciones = opciones + ["Personalizado…"]
         llm_model = st.sidebar.selectbox(
             f"Modelo ({opc['ayuda_modelo']})",
-            options=(modelos_disp or [opc["modelo_default"]]) + ["Personalizado…"],
+            options=opciones,
+            index=opciones.index(modelo_env_val) if modelo_env_val in opciones else 0,
             key="cfg_llm_model_openai_compat_select",
         )
         if llm_model == "Personalizado…" or not llm_model:
@@ -238,6 +247,8 @@ def _sidebar_config() -> dict:
             f"🟢 {len(modelos_disp)} modelos listados desde {opc['nombre']}" if modelos_disp
             else f"🔴 No se pudo listar el catálogo — verificá la API key o el modelo a mano en {opc['catalogo_url']}"
         )
+        if llm_backend_kind == "Groq (gratis)" and os.getenv("OPENROUTER_API_KEY") and os.getenv("OPENROUTER_LLM_MODEL"):
+            st.sidebar.caption("🛡️ Respaldo automático a OpenRouter activo si Groq falla a mitad de una corrida.")
     temperature = st.sidebar.slider("Temperatura", 0.0, 1.0, cfg.LLM_TEMPERATURE, 0.05, key="cfg_temperature")
     llm_max_tokens = st.sidebar.number_input(
         "Max tokens (análisis)", min_value=512, max_value=16384, value=cfg.LLM_MAX_TOKENS, step=256, key="cfg_llm_max_tokens"

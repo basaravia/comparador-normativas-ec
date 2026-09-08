@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace as _replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
@@ -49,8 +49,9 @@ from .config import (
 )
 from .document_parser import ManualParser, NormativaParser
 from .llm_grader import LLMGrader
-from .providers import Provider, ProviderSpec, build_embedding_backend
+from .providers import Provider, ProviderSpec, build_chat_model, build_embedding_backend
 from .search_engine import NormativaIndex
+from .settings import get as _get_setting
 
 logger = logging.getLogger(__name__)
 
@@ -263,7 +264,15 @@ def construir_comparador(indice: NormativaIndex, config: ServiceConfig) -> Docum
     (openai-compat genérico) que ya usan los embeddings locales — ambos exponen la
     API de OpenAI, solo cambian `base_url`/`api_key`. No hace falta un Provider nuevo
     por cada uno.
+
+    Con Groq, si además hay `OPENROUTER_API_KEY`/`OPENROUTER_LLM_MODEL` en el
+    entorno, se arma un respaldo automático vía `.with_fallbacks()` de LangChain:
+    una llamada que falla contra Groq (rate limit, error transitorio del
+    proveedor — verificado en vivo el 2026-09-08) reintenta sola contra
+    OpenRouter antes de abortar la corrida. Sin esas credenciales, sigue siendo
+    Groq solo, como hasta ahora — nadie tiene que pedirlo explícito.
     """
+    respaldo_spec = None
     if config.llm_backend_kind in ("openrouter", "groq"):
         es_groq = config.llm_backend_kind == "groq"
         spec = ProviderSpec(
@@ -274,17 +283,38 @@ def construir_comparador(indice: NormativaIndex, config: ServiceConfig) -> Docum
             api_key=config.llm_api_key,
             clave_env="GROQ_API_KEY" if es_groq else "OPENROUTER_API_KEY",
         )
+        if es_groq:
+            respaldo_key = _get_setting("OPENROUTER_API_KEY", default="")
+            respaldo_modelo = _get_setting("OPENROUTER_LLM_MODEL", default="")
+            if respaldo_key and respaldo_modelo:
+                respaldo_spec = ProviderSpec(
+                    proveedor=Provider.DMR, modelo=respaldo_modelo, base_url=OPENROUTER_BASE_URL,
+                    temperature=config.temperature, api_key=respaldo_key, clave_env="OPENROUTER_API_KEY",
+                )
     else:
         spec = ProviderSpec(
             proveedor=Provider.VERTEX,
             modelo=config.llm_model,
             temperature=config.temperature,
         )
-    grader = LLMGrader(
-        spec=spec,
-        max_tokens=config.llm_max_tokens,
-        grader_max_tokens=config.grader_max_tokens,
-    )
+
+    if respaldo_spec is not None:
+        primario = spec.resuelto()
+        respaldo = respaldo_spec.resuelto()
+        grader = LLMGrader(
+            chat_grader=build_chat_model(_replace(primario, max_tokens=config.grader_max_tokens))
+                .with_fallbacks([build_chat_model(_replace(respaldo, max_tokens=config.grader_max_tokens))]),
+            chat_analyst=build_chat_model(_replace(primario, max_tokens=config.llm_max_tokens))
+                .with_fallbacks([build_chat_model(_replace(respaldo, max_tokens=config.llm_max_tokens))]),
+            max_tokens=config.llm_max_tokens,
+            grader_max_tokens=config.grader_max_tokens,
+        )
+    else:
+        grader = LLMGrader(
+            spec=spec,
+            max_tokens=config.llm_max_tokens,
+            grader_max_tokens=config.grader_max_tokens,
+        )
     return DocumentComparator(
         normativa_index=indice,
         llm_grader=grader,
