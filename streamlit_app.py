@@ -100,6 +100,24 @@ def _opciones_modelo(disponibles: list[str], defecto: str) -> list[str]:
     return [defecto, cfg.DMR_LLM_FALLBACK, "Personalizado…"]
 
 
+@st.cache_data(ttl=15, show_spinner=False)
+def _vertex_adc_ok() -> tuple[bool, str]:
+    """Resuelve credenciales de GCP sin llamar a la red — igual de barato que el
+    chequeo de Ollama, pero local: `google.auth.default()` solo lee el archivo de
+    GOOGLE_APPLICATION_CREDENTIALS (o el ADC del entorno) y no confirma que el
+    proyecto/permiso sea válido. Alcanza para separar "no hay credenciales
+    configuradas" (error visible antes de gastar un LLM) de fallas de autorización
+    reales, que solo aparecen al llamar a Vertex de verdad.
+    """
+    try:
+        import google.auth
+
+        _, proyecto = google.auth.default()
+        return True, proyecto or "credenciales resueltas, sin proyecto en la credencial"
+    except Exception as e:
+        return False, str(e)
+
+
 def _sidebar_config() -> dict:
     st.sidebar.markdown("## ⚙️ Modelos fundacionales")
 
@@ -136,9 +154,11 @@ def _sidebar_config() -> dict:
         disabled=embed_backend_kind != "Docker Model Runner",
     )
     if embed_backend_kind == "Vertex AI":
+        vertex_ok, vertex_detalle = _vertex_adc_ok()
+        st.sidebar.caption(f"Modelo: `{cfg.VERTEX_EMBED_MODEL}` · región: `{cfg.VERTEX_EMBED_LOCATION}`")
         st.sidebar.caption(
-            f"Modelo: `{cfg.VERTEX_EMBED_MODEL}` · región: `{cfg.VERTEX_EMBED_LOCATION}` — "
-            "requiere GOOGLE_APPLICATION_CREDENTIALS en el entorno."
+            f"🟢 Credenciales GCP resueltas · proyecto `{vertex_detalle}`" if vertex_ok
+            else f"🔴 GOOGLE_APPLICATION_CREDENTIALS no resuelve: {vertex_detalle}"
         )
     if embed_model == "Personalizado…":
         embed_model = st.sidebar.text_input(
@@ -158,9 +178,11 @@ def _sidebar_config() -> dict:
     llm_model = st.sidebar.text_input(
         "Modelo Vertex (Gemini)", value=cfg.VERTEX_LLM_MODEL, key="cfg_llm_model",
     )
+    vertex_ok, vertex_detalle = _vertex_adc_ok()
+    st.sidebar.caption(f"Proyecto configurado: `{cfg.VERTEX_PROJECT_ID}` · región: `{cfg.VERTEX_LOCATION}`")
     st.sidebar.caption(
-        f"Proyecto: `{cfg.VERTEX_PROJECT_ID}` · región: `{cfg.VERTEX_LOCATION}` — "
-        "requiere GOOGLE_APPLICATION_CREDENTIALS en el entorno."
+        f"🟢 Credenciales GCP resueltas · proyecto de la credencial: `{vertex_detalle}`" if vertex_ok
+        else f"🔴 GOOGLE_APPLICATION_CREDENTIALS no resuelve: {vertex_detalle}"
     )
     temperature = st.sidebar.slider("Temperatura", 0.0, 1.0, cfg.LLM_TEMPERATURE, 0.05, key="cfg_temperature")
     llm_max_tokens = st.sidebar.number_input(

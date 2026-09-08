@@ -10,3 +10,34 @@ env:
     value: "false"
   - name: "PYTHONUNBUFFERED"
     value: "1"
+
+  # ── Vertex AI (LLM de grading + embeddings, Provider.VERTEX) ────────────────
+  # VERTEX_PROJECT_ID / VERTEX_LOCATION no son secretos: reemplazar el placeholder.
+  - name: "VERTEX_PROJECT_ID"
+    value: "REEMPLAZAR-project-id"
+  - name: "VERTEX_LOCATION"
+    value: "global"
+  # La cuenta de servicio SÍ es secreta. Databricks Apps inyecta secretos como
+  # contenido de variable, no como archivo montado — por eso el JSON completo
+  # (no una ruta) y src/bootstrap.py lo materializa a archivo en el arranque
+  # antes de que google-auth/ADC lo necesite. Requiere, antes de este deploy:
+  #   1. databricks secrets create-scope <scope>
+  #   2. databricks secrets put-secret <scope> gcp_credentials_json --string-value "$(cat clave.json)"
+  #   3. En la UI de la App → App resources → Add resource → Secret → ese scope/key,
+  #      con resource name "gcp_credentials_json" (el nombre que usa valueFrom abajo).
+  - name: "GOOGLE_APPLICATION_CREDENTIALS_JSON"
+    valueFrom: "gcp_credentials_json"
+
+  # ── Autenticación de la app (app/auth.py) ────────────────────────────────────
+  - name: "AUTH_ENABLED"
+    value: "true"
+  - name: "AUTH_USERNAME"
+    value: "REEMPLAZAR-usuario"
+  - name: "AUTH_PASSWORD"
+    valueFrom: "auth_password"          # App resources → Secret → resource name "auth_password"
+  # SESSION_SECRET_KEY (documentada en .env_example) no la lee ningún código: el login
+  # de streamlit_app.py vive en app/auth.py y usa st.session_state, sin firma. La firma
+  # HMAC de sesión SÍ existe, pero en api/security.py (la API FastAPI, no desplegada por
+  # este app.yaml) bajo el nombre AUTH_SECRET_KEY — otro nombre. Si en algún momento se
+  # despliega api/main.py en vez de streamlit_app.py, agregar acá AUTH_SECRET_KEY (no
+  # SESSION_SECRET_KEY) como secreto.
