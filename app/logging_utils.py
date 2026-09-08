@@ -72,9 +72,24 @@ class _StreamlitBufferHandler(logging.Handler):
 
 
 def setup_logging(level: int = logging.INFO) -> None:
-    """Configura logging de consola + panel en vivo. Llamar al inicio del script."""
+    """Configura logging de consola + panel en vivo. Llamar al inicio del proceso.
+
+    Seguro de llamar tanto desde `streamlit_app.py` como desde `api/main.py` (FastAPI,
+    sin runtime de Streamlit). Antes solo lo llamaba el primero — la formatter que
+    redacta credenciales (`_RedactingFormatter`, exigida por §14: "ninguna credencial
+    aparece en logs") y el reenvío a `RunHandle` (lo que alimenta `lineas` en el SSE de
+    progreso de la API) nunca se conectaban en el proceso de la API, así que
+    `stream_progress()` siempre devolvía `lineas` vacío para cualquier consumidor de
+    la API, y cualquier log de ese proceso —incluido uno con una credencial-shaped
+    string en un traceback— salía sin pasar por la redacción. `st.session_state`
+    fuera de un script-run de Streamlit lanza, no lo tolera en silencio como sí hace
+    el resto de este módulo (ver `_StreamlitBufferHandler.emit`) — de ahí el try/except.
+    """
     global _handlers_attached
-    st.session_state.setdefault(_SESSION_KEY, [])
+    try:
+        st.session_state.setdefault(_SESSION_KEY, [])
+    except Exception:
+        pass  # proceso sin runtime de Streamlit (p. ej. api/main.py)
 
     if _handlers_attached:
         return

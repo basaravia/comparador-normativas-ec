@@ -28,11 +28,25 @@ def _isolate_logging_state():
     esta fixture, la primera prueba que llame setup_logging() dejaría los
     handlers adjuntos para siempre y ninguna prueba posterior podría
     verificar la idempotencia partiendo de un estado limpio.
+
+    Se retiran los handlers propios de setup_logging() ANTES de cada prueba, no
+    solo se restauran después: `api/main.py` también llama a `setup_logging()`
+    ahora (antes solo lo hacía `streamlit_app.py`), y si `tests/test_api_endpoints.py`
+    lo importa antes en la misma sesión de pytest, el logger raíz llega a este
+    archivo con un `_StreamlitBufferHandler` ya puesto — "antes" dejaba de ser
+    realmente "antes" y `test_setup_logging_attaches_console_and_buffer_handlers`
+    contaba handlers que no puso esta prueba.
     """
     root = logging.getLogger()
     original_handlers = list(root.handlers)
     original_level = root.level
     original_attached = logging_utils._handlers_attached
+
+    root.handlers = [
+        h for h in root.handlers
+        if not isinstance(h, (logging.StreamHandler, logging_utils._StreamlitBufferHandler))
+    ]
+    logging_utils._handlers_attached = False
 
     yield
 

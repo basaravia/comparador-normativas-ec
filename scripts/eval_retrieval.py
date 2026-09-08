@@ -22,11 +22,16 @@ import numpy as np
 import pandas as pd
 import yaml
 
+from app.logging_utils import setup_logging
 from src.chunking import chunk_normativa_df
 from src.search_engine import NormativaIndex
 from tests.fixtures import FakeEmbeddingBackend
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+# setup_logging(), no logging.basicConfig(): la formatter que redacta credenciales
+# (§14, "ninguna credencial aparece en logs") vive ahí, no en un basicConfig suelto —
+# un basicConfig propio se salta esa protección para cualquier cosa que este script
+# registre (p. ej. un traceback con una URL que lleve una API key).
+setup_logging()
 logger = logging.getLogger(__name__)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent

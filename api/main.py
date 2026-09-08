@@ -16,8 +16,17 @@ from fastapi.staticfiles import StaticFiles
 
 from api.routers import auth, compare, documents, health, index, theme
 from api.security import SesionRequerida, require_session
+from app.logging_utils import setup_logging
 
 logger = logging.getLogger("api")
+
+# Misma formatter que redacta credenciales y el mismo reenvío a RunHandle que ya
+# conectaba streamlit_app.py — sin esto, `stream_progress()` (compare.py) siempre
+# devolvía `lineas` vacío para cualquier consumidor de la API (la SPA nunca veía el
+# panel de progreso en vivo), y ningún log de este proceso pasaba por la redacción
+# de credenciales que exige §14. `setup_logging()` ya tolera correr sin runtime de
+# Streamlit (ver app/logging_utils.py).
+setup_logging()
 
 API_DESCRIPTION = """
 # 📑 Comparador Automatizado de Normativas vs Manuales Internos — API REST
