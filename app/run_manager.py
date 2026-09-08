@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
 import traceback
 from collections import deque
 from dataclasses import dataclass, field
@@ -35,6 +36,15 @@ logger = logging.getLogger(__name__)
 
 # Cuántas líneas de log se conservan por corrida para el panel en vivo.
 _MAX_LINEAS_LOG = 500
+
+# Frecuencia mínima entre espejados no forzados, en segundos. `_on_progress` en
+# streamlit_app.py y en api/routers/compare.py llama a `_espejar()` una vez por
+# fila procesada — en un corpus de cientos/miles de filas, eso son otras tantas
+# escrituras bloqueantes de disco (mkdir + write_text de state.json) solo para un
+# espejo diagnóstico que el propio docstring de `_espejar()` dice que "tolera
+# fallos, no es la fuente de verdad". 0.5s es bastante fino para un panel en vivo
+# y evita el I/O redundante entre filas que procesan más rápido que eso.
+_ESPEJADO_MIN_INTERVALO_S = 0.5
 
 # Cuántas corridas terminales se conservan en memoria. Sin este límite, `_corridas`
 # crece sin cota durante la vida del proceso — cada corrida guarda su propio
@@ -79,6 +89,10 @@ class RunHandle:
     cancelar: threading.Event = field(default_factory=threading.Event, repr=False)
     resultado: Any = field(default=None, repr=False)
     _log: deque = field(default_factory=lambda: deque(maxlen=_MAX_LINEAS_LOG), repr=False)
+    # Instante (time.monotonic) del último espejado a disco no forzado — lo que
+    # permite a `RunManager._espejar()` acotar la frecuencia de escritura sin
+    # necesitar un registro aparte por run_id.
+    _ultimo_espejado: float = field(default=0.0, repr=False)
 
     @property
     def porcentaje(self) -> float:
@@ -170,7 +184,7 @@ class RunManager:
         with self._lock:
             self._corridas[handle.run_id] = handle
             self._purgar_terminales()
-        self._espejar(handle)
+        self._espejar(handle, forzar=True)
         return handle
 
     def _purgar_terminales(self) -> None:
@@ -204,7 +218,7 @@ class RunManager:
 
         def _correr() -> None:
             handle.estado = EstadoCorrida.CORRIENDO
-            self._espejar(handle)
+            self._espejar(handle, forzar=True)
             try:
                 handle.resultado = trabajo(handle)
                 handle.estado = (
@@ -221,7 +235,7 @@ class RunManager:
                 logger.debug("%s", traceback.format_exc())
             finally:
                 handle.terminado_en = datetime.now(timezone.utc).isoformat(timespec="seconds")
-                self._espejar(handle)
+                self._espejar(handle, forzar=True)
 
         threading.Thread(target=_correr, name=f"corrida-{handle.run_id}", daemon=True).start()
         return handle
@@ -239,13 +253,27 @@ class RunManager:
         handle.cancelar.set()
         handle.estado = EstadoCorrida.ABORTANDO
         handle.registrar("Cancelación solicitada; se detendrá tras la unidad en curso.")
-        self._espejar(handle)
+        self._espejar(handle, forzar=True)
         return True
 
     # ── espejo en disco ───────────────────────────────────────────────────
 
-    def _espejar(self, handle: RunHandle) -> None:
-        """Escribe `state.json`. Tolera fallos: es diagnóstico, no la fuente de verdad."""
+    def _espejar(self, handle: RunHandle, *, forzar: bool = False) -> None:
+        """Escribe `state.json`. Tolera fallos: es diagnóstico, no la fuente de verdad.
+
+        `forzar=True` para las transiciones de ciclo de vida (registrar, arrancar,
+        terminar) — esas siempre se escriben. Las llamadas de progreso por fila
+        (`_on_progress` en streamlit_app.py y api/routers/compare.py) no fuerzan, y
+        quedan acotadas a como mucho una escritura cada `_ESPEJADO_MIN_INTERVALO_S`:
+        antes cada fila procesada eran otras tantas escrituras de disco bloqueantes
+        solo para un espejo que el resto de este docstring ya dice que es tolerante
+        a perderse.
+        """
+        if not forzar:
+            ahora = time.monotonic()
+            if ahora - handle._ultimo_espejado < _ESPEJADO_MIN_INTERVALO_S:
+                return
+            handle._ultimo_espejado = ahora
         try:
             d = self.raiz / handle.run_id
             d.mkdir(parents=True, exist_ok=True)
