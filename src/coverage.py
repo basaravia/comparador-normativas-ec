@@ -115,7 +115,15 @@ class CoverageLink:
     # (`llm_grader.ComparisonResult`). Vive en la arista y no solo en la fila del Excel
     # porque el disparador "parcial con brechas declaradas" del ítem 10 se evalúa aquí.
     nivel_cumplimiento: str | None = None
+    analisis_general: str = ""
     brechas: tuple[str, ...] = ()
+
+    # Veredicto de la Vía 2 (`llm_grader.AdopcionResult.nivel_adopcion`): cubierto /
+    # parcial / no_cubierto / no_aplica. Vocabulario distinto de `nivel_cumplimiento`
+    # (que es de la Vía 1, cumple/parcial/omision/no_aplica) — no son el mismo campo
+    # con otro nombre, son dos preguntas distintas (§ docstring de dual.py), así que
+    # cada una necesita su propio campo en vez de forzarlas al mismo.
+    nivel_adopcion: str | None = None
 
     # Ítem 10. `requiere_revision_manual` no es "el análisis falló": es "el análisis no
     # alcanza para cerrar el veredicto y tiene que mirarlo una persona". La herramienta
@@ -307,6 +315,14 @@ class LinkTable:
                 nuevo.nivel_cumplimiento if gana_nuevo and nuevo.nivel_cumplimiento
                 else actual.nivel_cumplimiento or nuevo.nivel_cumplimiento
             ),
+            analisis_general=(
+                nuevo.analisis_general if gana_nuevo and nuevo.analisis_general
+                else actual.analisis_general or nuevo.analisis_general
+            ),
+            nivel_adopcion=(
+                nuevo.nivel_adopcion if gana_nuevo and nuevo.nivel_adopcion
+                else actual.nivel_adopcion or nuevo.nivel_adopcion
+            ),
             brechas=tuple(sorted(set(actual.brechas) | set(nuevo.brechas))),
             # La marca de revisión se une, no se sobrescribe: que una vía no viera motivo
             # para revisar no borra el que sí encontró la otra. Basta con unir un alias
@@ -446,19 +462,44 @@ def evaluar_revision_manual(
 
 # ── Agregaciones ──────────────────────────────────────────────────────────────
 
-def vista_manual(tabla: LinkTable, manual_df: pd.DataFrame) -> pd.DataFrame:
+def vista_manual(
+    tabla: LinkTable,
+    manual_df: pd.DataFrame,
+    analisis_por_seccion: dict[str, dict] | None = None,
+) -> pd.DataFrame:
     """Una fila por sección del manual — la Vía 1 del ítem 6.
 
     Incluye las secciones **sin ninguna arista**: son las que no encontraron norma
     aplicable, y omitirlas las volvería invisibles justo cuando hay que decidir si es una
     omisión del manual o una sección que genuinamente no tiene norma que le aplique.
+
+    `analisis_por_seccion` (opcional, `{chunk_id: {"nivel_cumplimiento", "analisis_general",
+    "brechas"}}`) es el respaldo para exactamente ese caso: una sección sin aristas no
+    tiene de dónde leer `nivel_cumplimiento`/`analisis_general` (viven en `CoverageLink`,
+    y sin aristas no hay ningún link del que leerlos), pero `analyze_comparison()` sí
+    corrió para ella —incluida la ["ninguna" → "no hay normas relacionadas, ¿es
+    omisión?"](../src/llm_grader.py) que es precisamente el caso que este parámetro
+    cubre. Con aristas, se usa la primera (todas cargan el mismo veredicto de sección,
+    ver `dual._links_desde_via1`).
     """
+    analisis_por_seccion = analisis_por_seccion or {}
     filas = []
     for _, seccion in manual_df.iterrows():
         chunk_id = seccion.get("chunk_id", "")
         enlaces = tabla.por_seccion(chunk_id)
         confirmados = [e for e in enlaces if e.relevante is True]
         revisar = any(e.requiere_revision_manual for e in enlaces)
+
+        if enlaces:
+            nivel_cumplimiento = enlaces[0].nivel_cumplimiento
+            analisis_general = enlaces[0].analisis_general
+            brechas = sorted({b for e in enlaces for b in e.brechas})
+        else:
+            respaldo = analisis_por_seccion.get(chunk_id, {})
+            nivel_cumplimiento = respaldo.get("nivel_cumplimiento")
+            analisis_general = respaldo.get("analisis_general", "")
+            brechas = list(respaldo.get("brechas", ()))
+
         filas.append({
             "chunk_id": chunk_id,
             "seccion_doc_id": seccion.get("doc_id", ""),
@@ -469,6 +510,9 @@ def vista_manual(tabla: LinkTable, manual_df: pd.DataFrame) -> pd.DataFrame:
             "articulos": [e.articulo_numero for e in confirmados],
             "normativas": sorted({e.articulo_doc_id for e in confirmados}),
             "origenes": sorted({o for e in enlaces for o in e.origenes}),
+            "nivel_cumplimiento": nivel_cumplimiento,
+            "analisis_general": analisis_general,
+            "brechas": brechas,
             # Las dos columnas dicen lo mismo: el consumidor (Excel, API, interfaz) puede
             # haberse escrito contra cualquiera de los dos nombres.
             "requiere_revision": revisar,
@@ -504,6 +548,20 @@ def vista_normativa(tabla: LinkTable, normativa_df: pd.DataFrame,
         # listara el motivo sin quedar marcado no aparecería en el filtro "Solo revisión
         # manual", que es donde alguien iría a buscarlo.
         revisar = any(e.requiere_revision_manual for e in enlaces) or not confirmados
+        # `nivel_adopcion` (cubierto/parcial/no_cubierto/no_aplica, de
+        # `AdopcionResult`) es el veredicto real del ítem 6; antes esta vista solo
+        # exponía el booleano `cubierto`, que colapsaba "parcial" en uno de los dos
+        # extremos sin que el papel de trabajo (ítem 9) pudiera distinguirlo. Se toma
+        # de la primera arista que lo traiga: todas las de un mismo artículo cargan el
+        # mismo veredicto (`dual._links_desde_via2`). Un artículo sin ninguna sección
+        # candidata no genera aristas (`_links_desde_via2` itera sobre `secciones`,
+        # vacía en ese caso) pero `analizar_adopcion()` sí devuelve "no_cubierto" sin
+        # consultar al modelo — el default de abajo reproduce esa misma conclusión en
+        # vez de dejarlo en blanco.
+        nivel_adopcion = next(
+            (e.nivel_adopcion for e in enlaces if e.nivel_adopcion),
+            None if confirmados else "no_cubierto",
+        )
         filas.append({
             "element_id": element_id,
             "articulo_doc_id": art.get("doc_id", ""),
@@ -513,6 +571,7 @@ def vista_normativa(tabla: LinkTable, normativa_df: pd.DataFrame,
             "n_secciones_confirmadas": len(confirmados),
             "secciones_que_lo_cubren": [e.seccion_jerarquia for e in confirmados],
             "cubierto": bool(confirmados),
+            "nivel_adopcion": nivel_adopcion,
             "origenes": sorted({o for e in enlaces for o in e.origenes}),
             "requiere_revision": revisar,
             "requiere_revision_manual": revisar,

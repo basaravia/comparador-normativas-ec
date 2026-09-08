@@ -17,7 +17,18 @@ DEFAULT_USERNAME = "asaravia002"
 
 
 def is_auth_enabled() -> bool:
-    """Indica si la autenticación está activa. Por defecto True."""
+    """Indica si la autenticación está activa. Por defecto True.
+
+    Carga `.env` antes de mirar el entorno, igual que `get_configured_credentials()`
+    de abajo. Sin esto, la primera llamada del proceso —que en Streamlit es
+    `check_auth()` al arrancar, antes de que nada más haya cargado `.env`— podía leer
+    `AUTH_ENABLED` como si no estuviera definida aunque sí lo estuviera en `.env`: no
+    abre el acceso (el default "true" es el lado seguro), pero sí podía mostrar un
+    login que un despliegue de prueba con `AUTH_ENABLED=false` en `.env` no esperaba.
+    """
+    from src import settings
+
+    settings.cargar_env()
     val = os.getenv("AUTH_ENABLED", "true").strip().lower()
     return val not in ("false", "0", "no", "off", "disable", "disabled")
 

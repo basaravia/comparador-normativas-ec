@@ -38,6 +38,18 @@ def check_auth() -> bool:
     if st.session_state.get("authenticated", False):
         return True
 
+    if not credentials_are_configured():
+        # Fail-closed: sin contraseña configurada, dejaba entrar con cualquier
+        # usuario y contraseña vacía (hmac.compare_digest("", "") es True). No hay
+        # contraseña por defecto segura que inventar aquí — se detiene la app y se
+        # dice exactamente qué falta, en vez de abrir el acceso.
+        st.error(
+            "🔒 Autenticación habilitada pero la contraseña no está configurada. "
+            "La app no puede arrancar así — defínela en `.env` o desactiva la "
+            "autenticación si es un entorno de prueba local."
+        )
+        st.stop()
+
     # Renderiza tarjeta de login limpia y centrada
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
