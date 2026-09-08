@@ -28,6 +28,17 @@ env:
   - name: "GOOGLE_APPLICATION_CREDENTIALS_JSON"
     valueFrom: "gcp_credentials_json"
 
+  # ── LLM alternativo sin cuenta de nube (openai-compat, ver src/service.py) ──
+  # Opcionales: solo hacen falta si en el sidebar se elige OpenRouter o Groq en vez
+  # de Vertex AI. Mismo patrón de secreto que gcp_credentials_json arriba:
+  #   databricks secrets put-secret <scope> openrouter_api_key --string-value "<key>"
+  #   databricks secrets put-secret <scope> groq_api_key --string-value "<key>"
+  # y en App resources → Add resource → Secret, con esos mismos resource names.
+  - name: "OPENROUTER_API_KEY"
+    valueFrom: "openrouter_api_key"
+  - name: "GROQ_API_KEY"
+    valueFrom: "groq_api_key"
+
   # ── Autenticación de la app (app/auth.py) ────────────────────────────────────
   - name: "AUTH_ENABLED"
     value: "true"

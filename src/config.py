@@ -90,6 +90,15 @@ OLLAMA_EMBED_DIM: int = 1024
 OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
 OPENROUTER_LLM_MODEL: str = ""
 
+# ── Groq (LLM — alternativa gratuita, hardware propio no agregador) ────────
+# También Provider.DMR (openai-compat). A diferencia de OpenRouter, Groq no separa
+# un subconjunto ":free": todo su catálogo corre en el tier gratuito, limitado por
+# cuota (confirmado por búsqueda web, septiembre 2026 — 30 req/min típico, hasta
+# 14.400/día en los modelos Llama). Tampoco fija modelo por defecto: mismo motivo
+# que OPENROUTER_LLM_MODEL, el catálogo cambia.
+GROQ_BASE_URL: str = "https://api.groq.com/openai/v1"
+GROQ_LLM_MODEL: str = ""
+
 # ── Alias DMR_* ─────────────────────────────────────────────────────────────
 # `embeddings.py`, `llm_grader.py`, `service.py`, `streamlit_app.py` y `master.ipynb`
 # importan estos nombres. Se conservan (en vez de renombrarlos en cada sitio) para que

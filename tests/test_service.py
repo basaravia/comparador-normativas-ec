@@ -128,6 +128,10 @@ class TestServiceConfig:
         assert ServiceConfig.desde_dict({"llm_backend_kind": "OpenRouter (gratis)"}) \
             .llm_backend_kind == "openrouter"
 
+    def test_traduce_groq(self):
+        assert ServiceConfig.desde_dict({"llm_backend_kind": "Groq (gratis)"}) \
+            .llm_backend_kind == "groq"
+
 
 class TestExportar:
 

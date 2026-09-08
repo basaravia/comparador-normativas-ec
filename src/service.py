@@ -42,6 +42,7 @@ from .config import (
     LLM_TEMPERATURE,
     MAX_WORKERS,
     MIN_SEMANTIC_SCORE,
+    GROQ_BASE_URL,
     OPENROUTER_BASE_URL,
     RERANKER_MODEL,
     RERANKER_TOP_N,
@@ -73,7 +74,7 @@ class ServiceConfig:
     embed_model: str | None = None
     base_url: str | None = None
     embed_backend_kind: str = "remoto"        # "remoto" | "local" | "vertex"
-    llm_backend_kind: str = "vertex"          # "vertex" | "openrouter"
+    llm_backend_kind: str = "vertex"          # "vertex" | "openrouter" | "groq"
     llm_base_url: str | None = None
     llm_api_key: str | None = None
 
@@ -118,6 +119,8 @@ class ServiceConfig:
             conocidas["embed_backend_kind"] = "remoto"
         if d.get("llm_backend_kind", "").startswith("OpenRouter"):
             conocidas["llm_backend_kind"] = "openrouter"
+        elif d.get("llm_backend_kind", "").startswith("Groq"):
+            conocidas["llm_backend_kind"] = "groq"
         elif "llm_backend_kind" in d:
             conocidas["llm_backend_kind"] = "vertex"
         return cls(**conocidas, extra={k: v for k, v in d.items() if k not in campos})
@@ -256,18 +259,20 @@ def construir_comparador(indice: NormativaIndex, config: ServiceConfig) -> Docum
     AI, con su propia auth (ADC). `config.llm_model=None` deja que `ProviderSpec.resuelto()`
     resuelva `VERTEX_LLM_MODEL` desde entorno/default, igual que ya hacía para DMR.
 
-    `llm_backend_kind="openrouter"` reutiliza el mismo `Provider.DMR` (openai-compat
-    genérico) que ya usan los embeddings locales — OpenRouter expone la API de OpenAI,
-    solo cambian `base_url`/`api_key`. No hace falta un Provider nuevo.
+    `llm_backend_kind` en {"openrouter", "groq"} reutiliza el mismo `Provider.DMR`
+    (openai-compat genérico) que ya usan los embeddings locales — ambos exponen la
+    API de OpenAI, solo cambian `base_url`/`api_key`. No hace falta un Provider nuevo
+    por cada uno.
     """
-    if config.llm_backend_kind == "openrouter":
+    if config.llm_backend_kind in ("openrouter", "groq"):
+        es_groq = config.llm_backend_kind == "groq"
         spec = ProviderSpec(
             proveedor=Provider.DMR,
             modelo=config.llm_model,
-            base_url=config.llm_base_url or OPENROUTER_BASE_URL,
+            base_url=config.llm_base_url or (GROQ_BASE_URL if es_groq else OPENROUTER_BASE_URL),
             temperature=config.temperature,
             api_key=config.llm_api_key,
-            clave_env="OPENROUTER_API_KEY",
+            clave_env="GROQ_API_KEY" if es_groq else "OPENROUTER_API_KEY",
         )
     else:
         spec = ProviderSpec(

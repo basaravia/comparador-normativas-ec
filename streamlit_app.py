@@ -168,10 +168,30 @@ def _sidebar_config() -> dict:
         "Batch size", min_value=1, max_value=128, value=cfg.EMBED_BATCH_SIZE, key="cfg_embed_batch"
     )
 
+    # Backends openai-compat gratuitos: mismo Provider.DMR que embeddings, solo cambia
+    # base_url/api_key/env de fallback — ver construir_comparador() en service.py.
+    # OpenRouter: agregador, catálogo :free rota. Groq: hardware propio, todo su
+    # catálogo corre gratis (rate-limited). Ambos confirmados por búsqueda web,
+    # septiembre 2026.
+    _LLM_OPENAI_COMPAT = {
+        "OpenRouter (gratis)": dict(
+            base_url=cfg.OPENROUTER_BASE_URL, modelo_default=cfg.OPENROUTER_LLM_MODEL,
+            clave_env="OPENROUTER_API_KEY", nombre="OpenRouter",
+            ayuda_modelo="elegí uno con sufijo `:free` para no gastar saldo",
+            catalogo_url="openrouter.ai/models?max_price=0",
+        ),
+        "Groq (gratis)": dict(
+            base_url=cfg.GROQ_BASE_URL, modelo_default=cfg.GROQ_LLM_MODEL,
+            clave_env="GROQ_API_KEY", nombre="Groq",
+            ayuda_modelo="todo el catálogo de Groq corre en el tier gratis (con cuota)",
+            catalogo_url="console.groq.com/docs/models",
+        ),
+    }
+
     st.sidebar.markdown("#### LLM (grading + análisis)")
     llm_backend_kind = st.sidebar.radio(
         "Backend del LLM",
-        ["Vertex AI", "OpenRouter (gratis)"],
+        ["Vertex AI", *_LLM_OPENAI_COMPAT.keys()],
         key="cfg_llm_backend",
     )
     llm_base_url = cfg.OPENROUTER_BASE_URL
@@ -193,34 +213,30 @@ def _sidebar_config() -> dict:
             else f"🔴 GOOGLE_APPLICATION_CREDENTIALS no resuelve: {vertex_detalle}"
         )
     else:
-        # OpenRouter es Provider.DMR (openai-compat genérico) apuntado a otra URL — el
-        # mismo mecanismo que ya usan los embeddings locales, ver construir_comparador().
+        opc = _LLM_OPENAI_COMPAT[llm_backend_kind]
         llm_base_url = st.sidebar.text_input(
-            "Base URL (OpenAI-compatible)", value=cfg.OPENROUTER_BASE_URL, key="cfg_llm_base_url",
-            help="Cambiá esto para apuntar a cualquier endpoint OpenAI-compatible (Grok/xAI: "
-                 "https://api.x.ai/v1, aunque ahí ya no hay tier gratis continuo).",
+            "Base URL (OpenAI-compatible)", value=opc["base_url"], key="cfg_llm_base_url",
+            help="Cualquier endpoint OpenAI-compatible sirve acá — cambiá esto para probar otro.",
         )
         llm_api_key = st.sidebar.text_input(
-            "API key", value=os.getenv("OPENROUTER_API_KEY", ""), type="password", key="cfg_llm_api_key",
-            help="También podés dejarla vacía y setear OPENROUTER_API_KEY en el entorno.",
+            "API key", value=os.getenv(opc["clave_env"], ""), type="password", key="cfg_llm_api_key",
+            help=f"También podés dejarla vacía y setear {opc['clave_env']} en el entorno.",
         )
-        # /models de OpenRouter (y de cualquier openai-compat) no exige auth para listar
-        # — mismo helper que ya usan los embeddings de Docker Model Runner.
-        modelos_openrouter = _modelos_del_backend(llm_base_url)
+        # /models no exige auth para listar en ninguno de los dos — mismo helper que ya
+        # usan los embeddings de Docker Model Runner.
+        modelos_disp = _modelos_del_backend(llm_base_url)
         llm_model = st.sidebar.selectbox(
-            "Modelo (elegí uno `:free` para no gastar saldo)",
-            options=(modelos_openrouter or [cfg.OPENROUTER_LLM_MODEL]) + ["Personalizado…"],
-            key="cfg_llm_model_openrouter_select",
+            f"Modelo ({opc['ayuda_modelo']})",
+            options=(modelos_disp or [opc["modelo_default"]]) + ["Personalizado…"],
+            key="cfg_llm_model_openai_compat_select",
         )
         if llm_model == "Personalizado…" or not llm_model:
             llm_model = st.sidebar.text_input(
-                "Modelo (custom)", value=cfg.OPENROUTER_LLM_MODEL, key="cfg_llm_model_openrouter_custom",
-                placeholder="ej: deepseek/deepseek-chat-v3.1:free",
+                "Modelo (custom)", value=opc["modelo_default"], key="cfg_llm_model_openai_compat_custom",
             )
         st.sidebar.caption(
-            f"🟢 {len(modelos_openrouter)} modelos listados desde OpenRouter" if modelos_openrouter
-            else "🔴 No se pudo listar el catálogo — verificá la API key o el modelo a mano "
-                 "en openrouter.ai/models?max_price=0"
+            f"🟢 {len(modelos_disp)} modelos listados desde {opc['nombre']}" if modelos_disp
+            else f"🔴 No se pudo listar el catálogo — verificá la API key o el modelo a mano en {opc['catalogo_url']}"
         )
     temperature = st.sidebar.slider("Temperatura", 0.0, 1.0, cfg.LLM_TEMPERATURE, 0.05, key="cfg_temperature")
     llm_max_tokens = st.sidebar.number_input(
@@ -506,11 +522,13 @@ with tab_compare:
         # corrida de horas — y con el ítem 1 ya no produce filas falsas, pero sigue
         # costando el tiempo (ítem 4).
         # El LLM puede ir a Vertex (sin listado; preflight se salta esa validación) o a
-        # OpenRouter (openai-compat, sí lista y sí se valida contra el catálogo real).
-        if config["llm_backend_kind"] == "OpenRouter (gratis)":
+        # un backend openai-compat (OpenRouter/Groq — sí lista y sí se valida contra el
+        # catálogo real).
+        if config["llm_backend_kind"] in ("OpenRouter (gratis)", "Groq (gratis)"):
+            clave_env = "GROQ_API_KEY" if config["llm_backend_kind"] == "Groq (gratis)" else "OPENROUTER_API_KEY"
             _spec_llm = ProviderSpec(
                 proveedor=Provider.DMR, base_url=config["llm_base_url"],
-                api_key=config["llm_api_key"], clave_env="OPENROUTER_API_KEY",
+                api_key=config["llm_api_key"], clave_env=clave_env,
             )
         else:
             _spec_llm = ProviderSpec(proveedor=Provider.VERTEX)
