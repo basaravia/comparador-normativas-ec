@@ -1,7 +1,7 @@
 # ── Document parsing ─────────────────────────────────────────────────────────
 # Docling: extracción PDF con LayoutML, OCR y HybridChunker
 docling==2.55.1
-ocrmac>=1.0.1                   # OCR nativo macOS (Vision framework) — Apple Silicon only
+ocrmac>=1.0.1; sys_platform == 'darwin'                   # OCR nativo macOS (Vision framework) — Apple Silicon only
 
 # ── LangChain + Docker Model Runner ──────────────────────────────────────────
 langchain==0.3.27
