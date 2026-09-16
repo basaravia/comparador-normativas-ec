@@ -19,9 +19,20 @@ output/docling/*_docling.json
 *.log
 *.zip
 .claude/
-document_test
 .venv_*
 .venv/
+
+# Manuales del cliente: NO se versionan. Se excluye el CONTENIDO de la carpeta
+# (`/*`) en vez de la carpeta entera, porque git no permite re-incluir un archivo
+# cuyo directorio padre está excluido — y hace falta la excepción de abajo.
+document_test/*
+# Excepción: los manuales MOCK que genera scripts/gen_manuales_mock.py. Son
+# ficticios y despersonalizados (entidad inventada, sin nombres de personas) y son
+# el fixture con el que se valida que el comparador distinga cumple/parcial/omisión.
+# El prefijo `MOCK-DEMO-` es deliberadamente improbable en un manual real, para que
+# la excepción no pueda arrastrar por accidente un documento de cliente.
+!document_test/MOCK-DEMO-*.pdf
+!document_test/LEEME-MANUALES-MOCK.md
 
 # Políticas corporativas (documentos confidenciales - NO subir)
 output/rag_index/*.md
