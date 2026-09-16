@@ -392,10 +392,31 @@ Para ejecutarla, poné `EJECUTAR_LLM = True` y volvé a correr la celda. Convien
 """)
 
 code('''
-EJECUTAR_LLM = False      # ← poné True para la corrida real contra Vertex
-MAX_SECCIONES = 6         # secciones del manual a analizar (Vía 1)
-MAX_ARTICULOS = 8         # artículos de la norma a analizar (Vía 2)
-MANUAL = "MOCK-DEMO-01.pdf"
+EJECUTAR_LLM = True             # ← apagalo para saltar la sección sin gastar tokens
+BACKEND_LLM  = "groq"           # "vertex" | "groq" | "openrouter"
+MAX_SECCIONES = 3               # secciones del manual a analizar (Vía 1)
+MAX_ARTICULOS = 4               # artículos de la norma a analizar (Vía 2)
+MANUAL = "MOCK-DEMO-01.pdf"     # perfil esperado: "parcial" (ver LEEME-MANUALES-MOCK.md)
+
+from src.settings import get as get_setting
+
+def config_llm(backend: str) -> ServiceConfig:
+    """ServiceConfig para el backend pedido, con el modelo SIEMPRE explícito.
+
+    `llm_model` no se puede omitir con groq/openrouter: `ProviderSpec.resuelto()`
+    para `Provider.DMR` cae a `DMR_LLM_MODEL`, que en esta rama vale el modelo de
+    Vertex — un llamador que lo omita termina mandando "gemini-..." al endpoint de
+    Groq y recibe un error de modelo inexistente que no dice eso.
+    """
+    base = dict(embed_backend_kind="remoto", embed_model=cfg.OLLAMA_EMBED_MODEL,
+                base_url=cfg.OLLAMA_BASE_URL, use_reranker=False, temperature=0.0)
+    if backend == "vertex":
+        return ServiceConfig(llm_backend_kind="vertex", llm_model=None, **base)
+    env = "GROQ_LLM_MODEL" if backend == "groq" else "OPENROUTER_LLM_MODEL"
+    return ServiceConfig(llm_backend_kind=backend, llm_model=get_setting(env, default=""), **base)
+
+config_corrida = config_llm(BACKEND_LLM)
+print(f"Backend: {BACKEND_LLM} · modelo: {config_corrida.llm_model or cfg.VERTEX_LLM_MODEL}")
 ''')
 
 code('''
@@ -410,10 +431,11 @@ else:
     norma_df = solo_articulos.head(MAX_ARTICULOS)
     print(f"Manual: {MANUAL} — {len(manual_df)} secciones · Norma — {len(norma_df)} artículos")
 
-    indice_manual = construir_indice_manual(manual_df, config)
+    indice_norma = construir_indice(norma_df, config_corrida)
+    indice_manual = construir_indice_manual(manual_df, config_corrida)
     bundle = comparar_dual(
-        indice_normativa=indice, indice_manual=indice_manual,
-        manual_df=manual_df, normativa_df=norma_df, config=config,
+        indice_normativa=indice_norma, indice_manual=indice_manual,
+        manual_df=manual_df, normativa_df=norma_df, config=config_corrida,
         progress_callback=lambda via, h, t: print(f"   {via}: {h}/{t}", end="\\r"),
     )
     print("\\nCorrida completa.")
@@ -438,6 +460,21 @@ if EJECUTAR_LLM:
 
     print(f"\\nCobertura global: {bundle.cobertura.porcentaje:.1%}")
     print("Alerta:", bundle.alerta_cobertura or "sin alerta — cobertura completa")
+
+    # Coherencia entre las dos columnas de veredicto de la Vía 2. `cubierto` es
+    # booleano y sale de si hay aristas confirmadas (que pueden venir de la Vía 1);
+    # `nivel_adopcion` es el veredicto del LLM sobre el artículo completo (Vía 2).
+    # Una fila que diga cubierto=True y nivel_adopcion="no_cubierto" es una
+    # contradicción visible en el papel de trabajo, y quien lo revise la va a rechazar.
+    vn = bundle.vista_normativa
+    contradictorias = vn[(vn["cubierto"]) & (vn["nivel_adopcion"] == "no_cubierto")]
+    print("\\n── Coherencia entre Vía 1 y Vía 2 ──")
+    print(f"Artículos con cubierto=True pero nivel_adopcion='no_cubierto': "
+          f"{len(contradictorias)} de {len(vn)}")
+    if len(contradictorias):
+        print("  ⚠ Las dos vías discrepan en esos artículos y la vista los muestra sin señalarlo.")
+        print(contradictorias[["numero", "cubierto", "nivel_adopcion",
+                               "n_secciones_confirmadas"]].to_string(index=False))
 
     print("\\n── Ítem 10 · filas marcadas para revisión manual ──")
     marcadas = bundle.vista_manual[bundle.vista_manual["requiere_revision_manual"]]
