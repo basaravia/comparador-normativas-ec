@@ -28,6 +28,13 @@ from src.errors import (
 from tests.fixtures import FakeGrader, FakeIndex
 
 
+def _respuesta(codigo: int):
+    """`openai.RateLimitError` exige un `httpx.Response` real para construirse."""
+    import httpx
+
+    return httpx.Response(codigo, request=httpx.Request("POST", "https://api.groq.com/"))
+
+
 class TestClasificacion:
     """`classify_llm_exception` decide abortar o degradar. Es la bisagra del ítem."""
 
@@ -51,6 +58,18 @@ class TestClasificacion:
         assert not isinstance(error, LLMUnavailableError), (
             "un fallo de parseo no debe abortar la corrida entera"
         )
+
+    def test_el_limite_de_tasa_se_nombra_como_tal(self):
+        """Caía en el cajón de lo desconocido y salía como "Error no clasificado del
+        backend (RateLimitError)", que manda a depurar la red cuando lo que hay que
+        hacer es bajar la concurrencia o subir de tier. Sigue abortando —llega aquí con
+        los reintentos del cliente ya agotados— pero diciendo qué pasó."""
+        exc = openai.RateLimitError("429", response=_respuesta(429), body=None)
+        error = classify_llm_exception(exc, modelo="gpt-oss-120b",
+                                       url="https://api.groq.com/openai/v1")
+        assert isinstance(error, LLMUnavailableError)
+        assert "límite de tasa" in str(error)
+        assert "no clasificado" not in str(error)
 
     def test_lo_desconocido_se_trata_como_infraestructura(self):
         """Ante la duda, detener. Lo contrario es el defecto original: seguir

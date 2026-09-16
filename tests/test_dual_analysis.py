@@ -66,7 +66,24 @@ class TestArticuloHuerfano:
         bundle, _, _ = _correr(normativa_df, manual_df)
         alerta = bundle.alerta_cobertura
         assert alerta is not None
-        assert "no están cubiertos" in alerta and "%" in alerta
+        assert "sin ninguna sección que los aborde" in alerta and "%" in alerta
+
+    def test_la_alerta_separa_el_parcial_del_articulo_huerfano(self, normativa_df,
+                                                               manual_df):
+        """Con `parcial` fuera del numerador, un mensaje que solo contara los huérfanos
+        se contradecía con su propio porcentaje: "2 de 4 no cubiertos" junto a "0 % de
+        cobertura" deja al lector sin saber cuál creer."""
+        arts = normativa_df[(normativa_df["tipo_elemento"] == "articulo")
+                            & (~normativa_df["es_referencia"])]
+        plan_v2 = {r["embed_text"]: [manual_df.iloc[0]["chunk_id"]]
+                   for _, r in arts.iterrows()}
+        adopcion = {r["numero"]: "parcial" for _, r in arts.iterrows()}
+        bundle, _, _ = _correr(normativa_df, manual_df, plan_v2=plan_v2,
+                               adopcion=adopcion)
+        assert bundle.cobertura.cubiertos == 0, "un parcial no es cobertura"
+        assert len(bundle.cobertura.parciales) == bundle.cobertura.total_articulos
+        assert not bundle.cobertura.sin_cobertura, "no son huérfanos: hay sección"
+        assert "cubiertos solo parcialmente" in bundle.alerta_cobertura
 
     def test_sin_alerta_cuando_la_cobertura_es_total(self, normativa_df, manual_df):
         arts = normativa_df[(normativa_df["tipo_elemento"] == "articulo")

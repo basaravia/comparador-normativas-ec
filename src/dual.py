@@ -93,10 +93,22 @@ class ComparisonBundle:
         """
         if self.cobertura.completa or self.cobertura.total_articulos == 0:
             return None
-        faltan = len(self.cobertura.sin_cobertura)
+        cob = self.cobertura
+        # Las dos brechas se nombran por separado. Decir solo "N artículos no cubiertos"
+        # al lado del porcentaje se contradecía en cuanto aparecía un `parcial`: 2 de 4
+        # sin cobertura junto a 0 % de cobertura deja al lector sin saber cuál de los dos
+        # números creer. `parcial` no suma al porcentaje —una implementación incompleta
+        # no satisface la premisa— pero tampoco es el artículo que nada aborda.
+        partes = [f"{len(cob.sin_cobertura)} sin ninguna sección que los aborde"] \
+            if cob.sin_cobertura else []
+        if cob.parciales:
+            partes.append(f"{len(cob.parciales)} cubiertos solo parcialmente")
+        detalle = " y ".join(partes) if partes else "ninguno cubierto por completo"
+        no_aplican = (f" Se excluyeron {len(cob.no_aplican)} artículos declarados no "
+                      f"aplicables." if cob.no_aplican else "")
         return (
-            f"{faltan} de {self.cobertura.total_articulos} artículos no están cubiertos "
-            f"por ninguna sección del manual ({self.cobertura.porcentaje:.1%} de cobertura)."
+            f"{cob.cubiertos} de {cob.total_articulos} artículos aplicables están "
+            f"cubiertos ({cob.porcentaje:.1%}): {detalle}.{no_aplican}"
         )
 
 

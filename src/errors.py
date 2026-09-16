@@ -225,6 +225,17 @@ def classify_llm_exception(
             f"El backend de modelos no responde: {exc}", modelo=modelo, url=url, causa=exc,
         )
 
+    # 3 bis · Límite de tasa. Llega aquí solo con los reintentos del cliente ya agotados
+    #     (el SDK de OpenAI respeta `retry-after` por su cuenta cuando `max_retries > 0`),
+    #     así que sí aborta la corrida. Pero se nombra aparte porque la acción del
+    #     operador es otra: bajar la concurrencia o subir de tier, no revisar la red.
+    #     Antes caía en el cajón 7 y salía como "Error no clasificado del backend".
+    if nombre in ("RateLimitError", "TooManyRequests"):
+        return LLMUnavailableError(
+            f"El backend rechazó la petición por límite de tasa: {exc}",
+            modelo=modelo, url=url, causa=exc,
+        )
+
     # 4 · Credenciales y permisos: no se arreglan reintentando.
     if nombre in ("AuthenticationError", "PermissionDeniedError", "PermissionDenied", "Unauthenticated"):
         return ProviderConfigError(f"Credenciales rechazadas por el proveedor: {exc}")

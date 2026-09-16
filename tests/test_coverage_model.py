@@ -188,6 +188,86 @@ class TestCoberturaGlobal:
         assert c.total_articulos == len(vista)
 
 
+class TestCoberturaUsaElVeredictoNoLaRelevancia:
+    """El indicador del Bloque A tiene que medir cumplimiento, no parecido temático.
+
+    Una corrida real contra Groq salió con 3 de 4 artículos en `cubierto=True` y
+    `nivel_adopcion="no_cubierto"` a la vez, y la cobertura global reportó 75 % mientras
+    la Vía 2 decía que ninguno estaba cubierto: el booleano se derivaba de que existiera
+    alguna arista confirmada —que solo afirma "esta sección es relevante para este
+    artículo"— y no del veredicto sobre si la obligación está implementada.
+    """
+
+    def _un_articulo(self, normativa_df):
+        arts = normativa_df[(normativa_df["tipo_elemento"] == "articulo")
+                            & (~normativa_df["es_referencia"])]
+        return arts.iloc[0]["element_id"]
+
+    def test_arista_confirmada_con_veredicto_no_cubierto_no_cuenta_como_cobertura(
+            self, normativa_df):
+        """El falso positivo exacto que inflaba el porcentaje."""
+        art = self._un_articulo(normativa_df)
+        t = LinkTable([_link(art=art, sec="S1", relevante=True,
+                             nivel_adopcion="no_cubierto")])
+        fila = vista_normativa(t, normativa_df).set_index("element_id").loc[art]
+        assert bool(fila["cubierto"]) is False
+        assert fila["n_secciones_confirmadas"] == 1, "la arista sigue siendo relevante"
+        assert fila["origen_cubierto"] == "adopcion"
+
+    def test_parcial_no_cuenta_como_cubierto_pero_se_reporta_aparte(self, normativa_df):
+        """Una implementación incompleta no satisface la premisa, y tampoco es un
+        artículo huérfano: mezclarlos borra la diferencia de gravedad."""
+        art = self._un_articulo(normativa_df)
+        t = LinkTable([_link(art=art, sec="S1", nivel_adopcion="parcial")])
+        c = cobertura_global(t, normativa_df)
+        assert [a["element_id"] for a in c.parciales] == [art]
+        assert art not in {a["element_id"] for a in c.sin_cobertura}
+        assert c.cubiertos == 0
+
+    def test_no_aplica_sale_del_denominador_y_queda_listado(self, normativa_df):
+        """Igual que `es_referencia`: contar como brecha lo que nadie tiene que cumplir
+        infla el hallazgo. El recorte se reporta para que sea auditable."""
+        art = self._un_articulo(normativa_df)
+        t = LinkTable([_link(art=art, sec="S1", nivel_adopcion="no_aplica")])
+        c = cobertura_global(t, normativa_df)
+        assert [a["element_id"] for a in c.no_aplican] == [art]
+        assert art not in {a["element_id"] for a in c.sin_cobertura}
+        assert c.total_articulos == c.total_evaluados - 1
+
+    def test_veredicto_cubierto_si_cuenta(self, normativa_df):
+        art = self._un_articulo(normativa_df)
+        t = LinkTable([_link(art=art, sec="S1", nivel_adopcion="cubierto")])
+        fila = vista_normativa(t, normativa_df).set_index("element_id").loc[art]
+        assert bool(fila["cubierto"]) is True
+
+    def test_sin_veredicto_de_via_2_cae_a_la_relevancia_y_lo_declara(self, normativa_df):
+        """Corrida de Vía 1 sola: no hay veredicto de adopción, el booleano de
+        relevancia es lo único disponible. Es más laxo, y por eso la vista lo dice."""
+        art = self._un_articulo(normativa_df)
+        t = LinkTable([_link(art=art, sec="S1", relevante=True)])
+        fila = vista_normativa(t, normativa_df).set_index("element_id").loc[art]
+        assert bool(fila["cubierto"]) is True
+        assert fila["origen_cubierto"] == "relevancia"
+        assert fila["nivel_adopcion"] is None
+
+    def test_el_porcentaje_cuadra_con_los_veredictos_de_la_vista(self, normativa_df):
+        """La regresión de fondo: el resumen y la tabla no pueden contar cosas
+        distintas."""
+        arts = normativa_df[(normativa_df["tipo_elemento"] == "articulo")
+                            & (~normativa_df["es_referencia"])]
+        t = LinkTable([
+            _link(art=r["element_id"], sec=f"S{i}", articulo_doc_id=r["doc_id"],
+                  nivel_adopcion="no_cubierto")
+            for i, (_, r) in enumerate(arts.iterrows())
+        ])
+        c = cobertura_global(t, normativa_df)
+        vista = vista_normativa(t, normativa_df)
+        assert c.porcentaje == 0.0, "artículos con secciones relacionadas pero sin " \
+                                    "adopción no son cobertura"
+        assert c.cubiertos == int(vista["cubierto"].sum())
+        assert len(c.sin_cobertura) == len(vista)
+
+
 class TestPersistencia:
 
     def test_round_trip_conserva_todo(self, tmp_path):

@@ -23,7 +23,7 @@
     <!-- Resultados y KPIs -->
     <template v-if="store.runStatus">
       <!-- Tarjetas de Cobertura Global (Ítem 6) -->
-      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div class="grid grid-cols-2 lg:grid-cols-5 gap-4">
         <div class="p-4 rounded-xl bg-surface border border-border shadow-sm">
           <span class="text-xs text-content-muted font-medium block">🎯 Cobertura Global</span>
           <span class="text-2xl sm:text-3xl font-bold text-primary font-mono mt-1 block">
@@ -42,6 +42,18 @@
           <span class="text-xs text-content-muted font-medium block">Artículos Cubiertos</span>
           <span class="text-2xl sm:text-3xl font-bold text-emerald-600 font-mono mt-1 block">
             {{ store.runStatus.vista_normativa.filter(a => a.cubierto).length }}
+          </span>
+        </div>
+
+        <!--
+          "Cubiertos" cuenta el veredicto de adopción de la Vía 2, no que exista alguna
+          sección relacionada. Un artículo con cobertura parcial no entra ahí ni en
+          "Huérfanos": necesita su propia tarjeta o desaparece del resumen.
+        -->
+        <div class="p-4 rounded-xl bg-surface border border-border shadow-sm">
+          <span class="text-xs text-content-muted font-medium block">Cobertura Parcial</span>
+          <span class="text-2xl sm:text-3xl font-bold text-amber-600 font-mono mt-1 block">
+            {{ (store.runStatus.articulos_parciales ?? []).length }}
           </span>
         </div>
 

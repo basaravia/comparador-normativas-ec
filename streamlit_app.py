@@ -744,19 +744,35 @@ with tab_results:
         bundle = st.session_state.get("bundle")
         if bundle is not None:
             st.markdown("### 🧭 Análisis en Doble Vía (Ítem 6)")
-            c1, c2, c3, c4 = st.columns(4)
-            pct = bundle.cobertura.porcentaje * 100
-            c1.metric("🎯 Cobertura Global", f"{pct:.1f}%")
-            c2.metric("Artículos en alcance", bundle.cobertura.total_articulos)
-            c3.metric("Artículos cubiertos", len(bundle.cobertura.cubiertos))
-            c4.metric("Artículos sin cobertura", len(bundle.cobertura.sin_cobertura))
+            cob = bundle.cobertura
+            c1, c2, c3, c4, c5 = st.columns(5)
+            c1.metric("🎯 Cobertura Global", f"{cob.porcentaje * 100:.1f}%")
+            c2.metric("Artículos en alcance", cob.total_articulos)
+            # `cubiertos` es un entero, no una lista: `len()` sobre él reventaba el panel
+            # entero con TypeError apenas terminaba una corrida en doble vía.
+            c3.metric("Artículos cubiertos", cob.cubiertos)
+            # "Parcial" no entra en `cubiertos` —no satisface la premisa del Bloque A—
+            # ni en `sin_cobertura`, que son los artículos que nada aborda.
+            c4.metric("Cobertura parcial", len(cob.parciales))
+            c5.metric("Artículos sin cobertura", len(cob.sin_cobertura))
 
             if bundle.alerta_cobertura:
                 st.warning(f"⚠️ **Alerta de Cobertura:** {bundle.alerta_cobertura}")
-                if bundle.cobertura.sin_cobertura:
-                    with st.expander("Listado de artículos sin cobertura (huérfanos)", expanded=False):
-                        for doc, num in bundle.cobertura.sin_cobertura:
-                            st.write(f"- `{doc}` — **Art. {num}**")
+                for titulo, fichas in (
+                    ("Listado de artículos sin cobertura (huérfanos)", cob.sin_cobertura),
+                    ("Listado de artículos con cobertura parcial", cob.parciales),
+                    ("Artículos declarados no aplicables (fuera del %)", cob.no_aplican),
+                ):
+                    if not fichas:
+                        continue
+                    with st.expander(f"{titulo} — {len(fichas)}", expanded=False):
+                        # Cada ficha es un dict (element_id/doc_id/numero/encabezado/
+                        # nivel_adopcion); desempaquetarla en `doc, num` lanzaba
+                        # ValueError en cuanto la alerta se disparaba.
+                        for f in fichas:
+                            st.write(f"- `{f.get('doc_id', '')}` — "
+                                     f"**Art. {f.get('numero', '')}** "
+                                     f"{f.get('encabezado', '')}")
 
             # Filtro de revisión manual (Ítem 10)
             st.markdown("#### 🔍 Filtro de Calidad y Revisión Manual (Ítem 10)")

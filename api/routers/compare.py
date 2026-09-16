@@ -245,6 +245,8 @@ def get_run_status(run_id: str) -> RunStatusResponse:
     cobertura_pct = None
     alerta = None
     sin_cobertura = []
+    parciales = []
+    no_aplican = []
     v1_data = []
     v2_data = []
     motivos_rev = []
@@ -254,6 +256,8 @@ def get_run_status(run_id: str) -> RunStatusResponse:
         cobertura_pct = bundle.cobertura.porcentaje
         alerta = bundle.alerta_cobertura
         sin_cobertura = bundle.cobertura.sin_cobertura
+        parciales = bundle.cobertura.parciales
+        no_aplican = bundle.cobertura.no_aplican
         v1_data = bundle.vista_manual.to_dict(orient="records")
         v2_data = bundle.vista_normativa.to_dict(orient="records")
 
@@ -276,6 +280,8 @@ def get_run_status(run_id: str) -> RunStatusResponse:
         cobertura_global=cobertura_pct,
         alerta_cobertura=alerta,
         articulos_sin_cobertura=sin_cobertura,
+        articulos_parciales=parciales,
+        articulos_no_aplican=no_aplican,
         vista_manual=v1_data,
         vista_normativa=v2_data,
         motivos_revision=motivos_rev,

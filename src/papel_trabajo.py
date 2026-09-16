@@ -146,9 +146,16 @@ def generar_papel_trabajo(
         if cobertura:
             filas_resumen.extend([
                 ("Porcentaje de Cobertura Global", f"{cobertura.porcentaje:.1%}"),
-                ("Total Artículos Evaluados", cobertura.total_articulos),
+                ("Total Artículos Evaluados", cobertura.total_evaluados),
+                ("Artículos Aplicables (base del %)", cobertura.total_articulos),
                 ("Artículos con Cobertura", cobertura.cubiertos),
+                # Las tres categorías de brecha se listan por separado: el porcentaje
+                # solo cuenta como cubierto lo que la Vía 2 declaró cubierto, así que
+                # un "parcial" cae fuera del numerador y quien lee el resumen tiene que
+                # poder distinguirlo del artículo que nada aborda.
+                ("Artículos con Cobertura Parcial", len(cobertura.parciales)),
                 ("Artículos Huérfanos / Sin Cobertura", len(cobertura.sin_cobertura)),
+                ("Artículos No Aplicables (excluidos del %)", len(cobertura.no_aplican)),
             ])
 
         if not df_v1.empty and "nivel_cumplimiento" in df_v1.columns:
@@ -325,7 +332,11 @@ def generar_papel_trabajo(
                     "identificador": f"{r.get('articulo_doc_id', '')} - Art. {r.get('numero', '')}",
                     "descripcion": r.get("encabezado", ""),
                     "motivos_revision": _aplanar_valor(r.get("motivos_revision", [])),
-                    "prioridad": "Alta" if not r.get("cubierto") else "Media",
+                    # Con `cubierto` ya derivado del veredicto de adopción, un "parcial"
+                    # sale con cubierto=False; no merece la misma prioridad que el
+                    # artículo que el manual no aborda en absoluto.
+                    "prioridad": ("Media" if r.get("cubierto")
+                                  or r.get("nivel_adopcion") == "parcial" else "Alta"),
                     "accion_sugerida": "Incorporar sección en manual interno para cubrir artículo",
                 })
 

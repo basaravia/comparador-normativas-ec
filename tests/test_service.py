@@ -133,6 +133,70 @@ class TestServiceConfig:
             .llm_backend_kind == "groq"
 
 
+class TestElBackendDeNubeSeDiagnosticaSolo:
+    """Groq y OpenRouter llegan por `Provider.DMR`, que está calibrado para el backend
+    local. Heredar esa calibración a ciegas produjo dos defectos que solo se ven cuando
+    algo falla — justo cuando el diagnóstico tiene que servir."""
+
+    def _spec_groq(self, con_respaldo: bool):
+        import src.service as s
+
+        original = s._get_setting
+
+        def fingido(clave, default=""):
+            if clave == "OPENROUTER_API_KEY":
+                return "clave-de-respaldo" if con_respaldo else ""
+            if clave == "OPENROUTER_LLM_MODEL":
+                return "modelo/respaldo" if con_respaldo else ""
+            return original(clave, default=default)
+        return fingido
+
+    def test_la_via_de_nube_reintenta_aunque_dmr_local_no(self, monkeypatch):
+        """Un 429 transitorio del tier gratuito ("reintentá en 4,5 s") abortaba la
+        corrida entera, porque `Provider.DMR` trae `max_retries=0` — correcto para un
+        Ollama local, no para una API de nube con límite por minuto."""
+        from src.providers import Provider, ProviderSpec
+
+        spec = ProviderSpec(proveedor=Provider.DMR, modelo="openai/gpt-oss-120b",
+                            base_url="https://api.groq.com/openai/v1",
+                            clave_env="GROQ_API_KEY", max_retries=3)
+        assert spec.reintentos_efectivos == 3
+        assert ProviderSpec(proveedor=Provider.DMR, modelo="m").reintentos_efectivos == 0, \
+            "el DMR local sigue sin reintentar: el backend es secuencial"
+
+    def test_con_respaldo_el_grader_sabe_contra_que_habló(self, monkeypatch):
+        """Al inyectar los clientes ya construidos, el grader se quedaba con los
+        defaults de DMR y un fallo contra Groq se reportaba como
+        `modelo=gemini-3.5-flash-lite · url=http://localhost:11434/v1`, que manda a
+        depurar el backend equivocado."""
+        monkeypatch.setattr(service, "_get_setting", self._spec_groq(con_respaldo=True))
+        monkeypatch.setattr(service, "build_chat_model", lambda spec: _ChatFalso())
+
+        comparador = service.construir_comparador(
+            indice=object(),
+            config=ServiceConfig(llm_backend_kind="groq",
+                                 llm_model="openai/gpt-oss-120b",
+                                 llm_api_key="clave-primaria"),
+        )
+        grader = comparador.grader
+        assert grader._model_id == "openai/gpt-oss-120b"
+        assert "groq.com" in grader._base_url
+
+
+class _ChatFalso:
+    """Mínimo para que `.with_fallbacks()` no toque la red.
+
+    Tiene `__call__` porque LangChain compone la cadena del grader y acepta callables
+    como runnables; sin eso, construir el grader revienta antes de llegar al assert.
+    """
+
+    def with_fallbacks(self, _otros):
+        return self
+
+    def __call__(self, _entrada):  # pragma: no cover - nunca se invoca
+        raise AssertionError("esta prueba no debe llamar al modelo")
+
+
 class TestExportar:
 
     def test_escribe_excel_y_json_en_el_directorio_de_la_corrida(self, tmp_path):

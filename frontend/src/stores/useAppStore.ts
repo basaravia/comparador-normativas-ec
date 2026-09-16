@@ -27,6 +27,8 @@ export interface RunStatus {
   cobertura_global?: number
   alerta_cobertura?: string
   articulos_sin_cobertura: Array<{ doc_id: string; numero: string }>
+  articulos_parciales: Array<{ doc_id: string; numero: string }>
+  articulos_no_aplican: Array<{ doc_id: string; numero: string }>
   vista_manual: Array<Record<string, any>>
   vista_normativa: Array<Record<string, any>>
   motivos_revision: string[]

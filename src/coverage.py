@@ -562,6 +562,29 @@ def vista_normativa(tabla: LinkTable, normativa_df: pd.DataFrame,
             (e.nivel_adopcion for e in enlaces if e.nivel_adopcion),
             None if confirmados else "no_cubierto",
         )
+        # `cubierto` responde "¿la obligación está implementada?", no "¿hay alguna
+        # sección que hable de esto?". Antes se derivaba de `bool(confirmados)`, que es
+        # lo segundo: una arista confirmada solo afirma que la sección es relevante para
+        # el artículo. Las dos preguntas colapsadas en un booleano inflaban la cobertura
+        # — una corrida real dio 75 % con los cuatro artículos en `no_cubierto` — y ese
+        # booleano es justo el que alimenta `cobertura_global`, el indicador del
+        # Bloque A. El falso positivo que el proyecto viene corrigiendo, en el
+        # indicador principal.
+        #
+        # `parcial` NO cuenta como cubierto: una implementación incompleta no satisface
+        # la premisa de que toda la normativa quede cubierta. Pero se reporta aparte
+        # (`Cobertura.parciales`) para no confundirlo con el artículo huérfano, que es
+        # un hallazgo de otra gravedad.
+        #
+        # Sin veredicto de Vía 2 —corrida de una sola vía, o un grading que no llegó a
+        # `analizar_adopcion`— se cae al booleano de relevancia, que es lo único que hay.
+        # Es más laxo, y por eso queda explícito en la columna `origen_cubierto`.
+        if nivel_adopcion is None:
+            cubierto = bool(confirmados)
+            origen_cubierto = "relevancia"
+        else:
+            cubierto = nivel_adopcion == "cubierto"
+            origen_cubierto = "adopcion"
         filas.append({
             "element_id": element_id,
             "articulo_doc_id": art.get("doc_id", ""),
@@ -570,7 +593,13 @@ def vista_normativa(tabla: LinkTable, normativa_df: pd.DataFrame,
             "n_secciones_relacionadas": len(enlaces),
             "n_secciones_confirmadas": len(confirmados),
             "secciones_que_lo_cubren": [e.seccion_jerarquia for e in confirmados],
-            "cubierto": bool(confirmados),
+            "cubierto": cubierto,
+            "origen_cubierto": origen_cubierto,
+            # `no_aplica` sale del denominador de la cobertura: un artículo que no
+            # impone obligación a una entidad como esta no puede estar "descubierto", y
+            # contarlo como brecha infla el hallazgo igual que `es_referencia`. Se
+            # reporta aparte para que nadie tenga que creerse el recorte a ciegas.
+            "aplica": nivel_adopcion != "no_aplica",
             "nivel_adopcion": nivel_adopcion,
             "origenes": sorted({o for e in enlaces for o in e.origenes}),
             "requiere_revision": revisar,
@@ -587,13 +616,28 @@ def vista_normativa(tabla: LinkTable, normativa_df: pd.DataFrame,
 class Cobertura:
     """Resultado del cálculo de cobertura — la premisa no negociable del Bloque A."""
 
+    #: Denominador: artículos aplicables. Excluye los `no_aplica`, que van en su
+    #: propia lista para que el recorte sea auditable y no un número que aparece solo.
     total_articulos: int
     cubiertos: int
+    #: Artículos aplicables sin ninguna cobertura sustantiva (`no_cubierto`, o sin
+    #: sección confirmada cuando no hubo Vía 2).
     sin_cobertura: list[dict] = field(default_factory=list)
+    #: Aplicables con implementación incompleta (`parcial`). No cuentan como cubiertos
+    #: —no satisfacen la premisa del Bloque A— pero son un hallazgo distinto al
+    #: artículo huérfano y el papel de trabajo tiene que poder separarlos.
+    parciales: list[dict] = field(default_factory=list)
+    #: Artículos que el modelo declaró fuera del perímetro de la entidad.
+    no_aplican: list[dict] = field(default_factory=list)
 
     @property
     def porcentaje(self) -> float:
         return self.cubiertos / self.total_articulos if self.total_articulos else 0.0
+
+    @property
+    def total_evaluados(self) -> int:
+        """Artículos mirados, aplicables o no — el universo antes del recorte."""
+        return self.total_articulos + len(self.no_aplican)
 
     @property
     def completa(self) -> bool:
@@ -603,10 +647,13 @@ class Cobertura:
         return {
             "version_esquema": VERSION_ESQUEMA,
             "total_articulos": self.total_articulos,
+            "total_evaluados": self.total_evaluados,
             "cubiertos": self.cubiertos,
             "porcentaje": round(self.porcentaje, 4),
             "completa": self.completa,
             "sin_cobertura": self.sin_cobertura,
+            "parciales": self.parciales,
+            "no_aplican": self.no_aplican,
         }
 
     def guardar(self, path: Path | str) -> Path:
@@ -623,19 +670,26 @@ def cobertura_global(tabla: LinkTable, normativa_df: pd.DataFrame,
 
     Se calcula sobre la misma `vista_normativa` que ve el auditor, no por separado: dos
     cálculos independientes podrían discrepar, y un porcentaje que no cuadre con la tabla
-    de abajo destruye la confianza en el papel de trabajo entero.
+    de abajo destruye la confianza en el papel de trabajo entero. Por eso "cubierto"
+    significa aquí exactamente lo mismo que en esa vista: el veredicto de adopción de la
+    Vía 2, no la mera existencia de una sección relacionada.
     """
     vista = vista_normativa(tabla, normativa_df, incluir_referencias)
     if vista.empty:
         return Cobertura(total_articulos=0, cubiertos=0)
 
-    sin = vista[~vista["cubierto"]]
+    def _ficha(r) -> dict:
+        return {"element_id": r["element_id"], "doc_id": r["articulo_doc_id"],
+                "numero": r["numero"], "encabezado": r["encabezado"],
+                "nivel_adopcion": r["nivel_adopcion"]}
+
+    aplicables = vista[vista["aplica"]]
+    parcial = aplicables["nivel_adopcion"] == "parcial"
+    sin = aplicables[~aplicables["cubierto"] & ~parcial]
     return Cobertura(
-        total_articulos=len(vista),
-        cubiertos=int(vista["cubierto"].sum()),
-        sin_cobertura=[
-            {"element_id": r["element_id"], "doc_id": r["articulo_doc_id"],
-             "numero": r["numero"], "encabezado": r["encabezado"]}
-            for _, r in sin.iterrows()
-        ],
+        total_articulos=len(aplicables),
+        cubiertos=int(aplicables["cubierto"].sum()),
+        sin_cobertura=[_ficha(r) for _, r in sin.iterrows()],
+        parciales=[_ficha(r) for _, r in aplicables[parcial].iterrows()],
+        no_aplican=[_ficha(r) for _, r in vista[~vista["aplica"]].iterrows()],
     )

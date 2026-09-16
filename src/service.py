@@ -282,6 +282,12 @@ def construir_comparador(indice: NormativaIndex, config: ServiceConfig) -> Docum
             temperature=config.temperature,
             api_key=config.llm_api_key,
             clave_env="GROQ_API_KEY" if es_groq else "OPENROUTER_API_KEY",
+            # Groq y OpenRouter son nube, aunque lleguen por `Provider.DMR`, que existe
+            # para el backend local y trae `max_retries=0`. Heredarlo hacía que un 429
+            # transitorio —"reintentá en 4,5 s", el límite de tokens por minuto del tier
+            # gratuito— abortara la corrida entera en vez de esperar. El SDK de OpenAI
+            # respeta `retry-after` con backoff cuando esto es > 0.
+            max_retries=3,
         )
         if es_groq:
             respaldo_key = _get_setting("OPENROUTER_API_KEY", default="")
@@ -290,6 +296,7 @@ def construir_comparador(indice: NormativaIndex, config: ServiceConfig) -> Docum
                 respaldo_spec = ProviderSpec(
                     proveedor=Provider.DMR, modelo=respaldo_modelo, base_url=OPENROUTER_BASE_URL,
                     temperature=config.temperature, api_key=respaldo_key, clave_env="OPENROUTER_API_KEY",
+                    max_retries=3,
                 )
     else:
         spec = ProviderSpec(
@@ -306,6 +313,14 @@ def construir_comparador(indice: NormativaIndex, config: ServiceConfig) -> Docum
                 .with_fallbacks([build_chat_model(_replace(respaldo, max_tokens=config.grader_max_tokens))]),
             chat_analyst=build_chat_model(_replace(primario, max_tokens=config.llm_max_tokens))
                 .with_fallbacks([build_chat_model(_replace(respaldo, max_tokens=config.llm_max_tokens))]),
+            # Al inyectar los clientes ya construidos, el grader no puede deducir contra
+            # qué habló: sin estos dos, `_model_id`/`_base_url` se quedaban en los
+            # defaults de DMR y un fallo contra Groq se reportaba como
+            # "modelo=gemini-3.5-flash-lite · url=http://localhost:11434/v1". El mensaje
+            # del ítem 1 tiene que ser accionable, y ese manda a depurar el backend
+            # equivocado.
+            model=primario.modelo,
+            base_url=primario.base_url or "",
             max_tokens=config.llm_max_tokens,
             grader_max_tokens=config.grader_max_tokens,
         )

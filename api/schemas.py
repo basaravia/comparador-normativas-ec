@@ -135,7 +135,14 @@ class RunStatusResponse(BaseModel):
     error: Optional[str] = None
     cobertura_global: Optional[float] = None
     alerta_cobertura: Optional[str] = None
+    # Las tres categorías de la Vía 2 van por separado. `cobertura_global` cuenta como
+    # cubierto solo lo que el veredicto de adopción declaró cubierto, así que un
+    # artículo `parcial` no está ni en el numerador ni en `articulos_sin_cobertura`:
+    # sin su propia lista desaparecería de la vista del consumidor, que es la manera
+    # más silenciosa de subestimar la brecha.
     articulos_sin_cobertura: List[Dict[str, Any]] = Field(default_factory=list)
+    articulos_parciales: List[Dict[str, Any]] = Field(default_factory=list)
+    articulos_no_aplican: List[Dict[str, Any]] = Field(default_factory=list)
     vista_manual: List[Dict[str, Any]] = Field(default_factory=list)
     vista_normativa: List[Dict[str, Any]] = Field(default_factory=list)
     motivos_revision: List[str] = Field(default_factory=list)
