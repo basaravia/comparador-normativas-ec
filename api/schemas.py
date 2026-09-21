@@ -111,7 +111,7 @@ class StartCompareRequest(BaseModel):
     # nunca conectó el mismo interruptor. Valores canónicos, no las etiquetas de
     # presentación del sidebar ('Groq (gratis)'): quien llame a la API no tiene por
     # qué conocerlas, y así lo valida además el propio esquema OpenAPI.
-    llm_backend_kind: Optional[Literal["vertex", "openrouter", "groq"]] = None
+    llm_backend_kind: Optional[Literal["vertex", "openrouter", "groq", "foundry"]] = None
 
 
 class StartCompareResponse(BaseModel):

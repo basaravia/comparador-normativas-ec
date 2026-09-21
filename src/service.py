@@ -48,6 +48,7 @@ from .config import (
     RERANKER_TOP_N,
 )
 from .document_parser import ManualParser, NormativaParser
+from .errors import ProviderConfigError
 from .llm_grader import LLMGrader
 from .providers import Provider, ProviderSpec, build_chat_model, build_embedding_backend
 from .search_engine import NormativaIndex
@@ -75,7 +76,7 @@ class ServiceConfig:
     embed_model: str | None = None
     base_url: str | None = None
     embed_backend_kind: str = "remoto"        # "remoto" | "local" | "vertex"
-    llm_backend_kind: str = "vertex"          # "vertex" | "openrouter" | "groq"
+    llm_backend_kind: str = "vertex"          # "vertex" | "openrouter" | "groq" | "foundry"
     llm_base_url: str | None = None
     llm_api_key: str | None = None
 
@@ -122,6 +123,8 @@ class ServiceConfig:
             conocidas["llm_backend_kind"] = "openrouter"
         elif d.get("llm_backend_kind", "").startswith("Groq"):
             conocidas["llm_backend_kind"] = "groq"
+        elif d.get("llm_backend_kind", "").startswith("Foundry"):
+            conocidas["llm_backend_kind"] = "foundry"
         elif "llm_backend_kind" in d:
             conocidas["llm_backend_kind"] = "vertex"
         return cls(**conocidas, extra={k: v for k, v in d.items() if k not in campos})
@@ -260,7 +263,7 @@ def construir_comparador(indice: NormativaIndex, config: ServiceConfig) -> Docum
     AI, con su propia auth (ADC). `config.llm_model=None` deja que `ProviderSpec.resuelto()`
     resuelva `VERTEX_LLM_MODEL` desde entorno/default, igual que ya hacía para DMR.
 
-    `llm_backend_kind` en {"openrouter", "groq"} reutiliza el mismo `Provider.DMR`
+    `llm_backend_kind` en {"openrouter", "groq", "foundry"} reutiliza el mismo `Provider.DMR`
     (openai-compat genérico) que ya usan los embeddings locales — ambos exponen la
     API de OpenAI, solo cambian `base_url`/`api_key`. No hace falta un Provider nuevo
     por cada uno.
@@ -273,21 +276,49 @@ def construir_comparador(indice: NormativaIndex, config: ServiceConfig) -> Docum
     Groq solo, como hasta ahora — nadie tiene que pedirlo explícito.
     """
     respaldo_spec = None
-    if config.llm_backend_kind in ("openrouter", "groq"):
+    if config.llm_backend_kind in ("openrouter", "groq", "foundry"):
         es_groq = config.llm_backend_kind == "groq"
+        es_foundry = config.llm_backend_kind == "foundry"
+        if es_foundry:
+            # Azure AI Foundry expone la API de OpenAI: mismo cliente, cambian URL y clave.
+            # No hay URL por defecto —es de cada recurso— y sin ella no hay a dónde ir.
+            base_url = config.llm_base_url or _get_setting("LLM_BASE_URL", default="")
+            if not base_url:
+                raise ProviderConfigError(
+                    "Falta la URL del endpoint de Foundry: indícala en la UI/API o en "
+                    "LLM_BASE_URL."
+                )
+            clave_env, modelo_env = "LLM_API_KEY", "FOUNDRY_LLM_MODEL"
+        else:
+            base_url = config.llm_base_url or (GROQ_BASE_URL if es_groq else OPENROUTER_BASE_URL)
+            clave_env = "GROQ_API_KEY" if es_groq else "OPENROUTER_API_KEY"
+            modelo_env = "GROQ_LLM_MODEL" if es_groq else "OPENROUTER_LLM_MODEL"
+        # Sin modelo explícito (una llamada por API, por ejemplo) se toma del entorno del
+        # backend. Dejarlo vacío hacía que `ProviderSpec.resuelto()` cayera a
+        # `DMR_LLM_MODEL`, que es el de Vertex, y el endpoint remoto contestara "modelo
+        # inexistente" sin decir de dónde salió el nombre.
+        modelo = config.llm_model or _get_setting(modelo_env, default="") or None
         spec = ProviderSpec(
             proveedor=Provider.DMR,
-            modelo=config.llm_model,
-            base_url=config.llm_base_url or (GROQ_BASE_URL if es_groq else OPENROUTER_BASE_URL),
+            modelo=modelo,
+            base_url=base_url,
             temperature=config.temperature,
             api_key=config.llm_api_key,
-            clave_env="GROQ_API_KEY" if es_groq else "OPENROUTER_API_KEY",
+            clave_env=clave_env,
             # Groq y OpenRouter son nube, aunque lleguen por `Provider.DMR`, que existe
             # para el backend local y trae `max_retries=0`. Heredarlo hacía que un 429
             # transitorio —"reintentá en 4,5 s", el límite de tokens por minuto del tier
             # gratuito— abortara la corrida entera en vez de esperar. El SDK de OpenAI
             # respeta `retry-after` con backoff cuando esto es > 0.
             max_retries=3,
+            extra={
+                **({"sin_listado": True} if es_foundry else {}),
+                # Opt-in: hay modelos de razonamiento que rechazan una temperatura distinta
+                # de la de fábrica. Se activa solo si el endpoint real lo exige.
+                **({"sin_temperatura": True}
+                   if es_foundry and _get_setting("FOUNDRY_OMIT_TEMPERATURE", default="")
+                   .strip().lower() in ("1", "true", "yes", "si", "sí", "on") else {}),
+            },
         )
         if es_groq:
             respaldo_key = _get_setting("OPENROUTER_API_KEY", default="")

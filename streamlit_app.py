@@ -186,6 +186,15 @@ def _sidebar_config() -> dict:
             ayuda_modelo="todo el catálogo de Groq corre en el tier gratis (con cuota)",
             catalogo_url="console.groq.com/docs/models",
         ),
+        # Azure AI Foundry en la cuenta propia: los datos no salen a un tercero. No hay URL
+        # ni modelo por defecto —son de cada recurso— y el "modelo" es el nombre del
+        # deployment, que el endpoint no siempre lista en /models.
+        "Foundry (cuenta propia)": dict(
+            base_url=os.getenv("LLM_BASE_URL", ""), modelo_default=os.getenv("FOUNDRY_LLM_MODEL", ""),
+            clave_env="LLM_API_KEY", modelo_env="FOUNDRY_LLM_MODEL", nombre="Foundry",
+            ayuda_modelo="nombre del deployment en Foundry",
+            catalogo_url="el portal de Azure AI Foundry (nombre del deployment)",
+        ),
     }
 
     st.sidebar.markdown("#### LLM (grading + análisis)")
@@ -535,11 +544,16 @@ with tab_compare:
         # El LLM puede ir a Vertex (sin listado; preflight se salta esa validación) o a
         # un backend openai-compat (OpenRouter/Groq — sí lista y sí se valida contra el
         # catálogo real).
-        if config["llm_backend_kind"] in ("OpenRouter (gratis)", "Groq (gratis)"):
-            clave_env = "GROQ_API_KEY" if config["llm_backend_kind"] == "Groq (gratis)" else "OPENROUTER_API_KEY"
+        if config["llm_backend_kind"] in ("OpenRouter (gratis)", "Groq (gratis)", "Foundry (cuenta propia)"):
+            clave_env = {"Groq (gratis)": "GROQ_API_KEY",
+                         "Foundry (cuenta propia)": "LLM_API_KEY"}.get(
+                config["llm_backend_kind"], "OPENROUTER_API_KEY")
             _spec_llm = ProviderSpec(
                 proveedor=Provider.DMR, base_url=config["llm_base_url"],
                 api_key=config["llm_api_key"], clave_env=clave_env,
+                # Foundry nombra deployments, que /models no lista: validarlos contra el
+                # catálogo bloquearía una configuración correcta.
+                extra={"sin_listado": True} if config["llm_backend_kind"].startswith("Foundry") else {},
             )
         else:
             _spec_llm = ProviderSpec(proveedor=Provider.VERTEX)

@@ -161,6 +161,17 @@ CAPACIDADES: dict[Provider, ProviderCapabilities] = {
 }
 
 
+_HOSTS_LOCALES = ("localhost", "127.0.0.1", "::1", "0.0.0.0", "host.docker.internal")
+
+
+def _es_endpoint_local(url: str | None) -> bool:
+    """True si la URL apunta a esta máquina o a su contenedor (Ollama, Docker Model Runner)."""
+    if not url:
+        return True
+    from urllib.parse import urlparse
+    return (urlparse(url).hostname or "") in _HOSTS_LOCALES
+
+
 @dataclass(frozen=True)
 class ProviderSpec:
     """Qué proveedor, qué modelo y con qué parámetros."""
@@ -202,9 +213,10 @@ class ProviderSpec:
     def resuelto(self) -> ProviderSpec:
         """Rellena lo que falte desde el entorno y los defaults (precedencia de settings)."""
         if self.proveedor is Provider.DMR:
+            modelo = get("DMR_LLM_MODEL", ui=self.modelo, default="")
             return ProviderSpec(
                 proveedor=self.proveedor,
-                modelo=get("DMR_LLM_MODEL", ui=self.modelo, default=DMR_LLM_MODEL),
+                modelo=modelo or DMR_LLM_MODEL,
                 base_url=get("DMR_BASE_URL", ui=self.base_url, default=DMR_BASE_URL),
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
@@ -214,7 +226,10 @@ class ProviderSpec:
                 clave_env=self.clave_env,
                 timeout_s=self.timeout_s,
                 max_retries=self.max_retries,
-                extra=self.extra,
+                # Si nadie dio modelo, `DMR_LLM_MODEL` vale el de Vertex: sirve de default
+                # para un backend local, pero es un error mandarlo a un endpoint remoto
+                # (Groq, Foundry…). `build_chat_model` lo comprueba con esta marca.
+                extra={**self.extra, **({} if modelo else {"modelo_por_defecto": True})},
             )
         if self.proveedor is Provider.VERTEX:
             # Sin api_key: Vertex autentica con ADC (Application Default Credentials),
@@ -269,6 +284,16 @@ def build_chat_model(spec: ProviderSpec) -> Any:
     if spec.proveedor is Provider.DMR:
         from langchain_openai import ChatOpenAI
 
+        # Un endpoint remoto sin modelo explícito recibía `DMR_LLM_MODEL`, que en esta rama
+        # es el de Vertex: Groq/Foundry contestaban "modelo inexistente" sin decir de dónde
+        # salía el nombre. Es un error de configuración y se dice como tal, antes de la red.
+        if spec.extra.get("modelo_por_defecto") and not _es_endpoint_local(spec.base_url):
+            raise ProviderConfigError(
+                f"No hay modelo configurado para el endpoint remoto {spec.base_url}. "
+                "Indícalo en la UI/API o en la variable del backend (GROQ_LLM_MODEL, "
+                "OPENROUTER_LLM_MODEL, FOUNDRY_LLM_MODEL o DMR_LLM_MODEL)."
+            )
+
         return ChatOpenAI(
             model=spec.modelo,
             base_url=spec.base_url,
@@ -276,7 +301,9 @@ def build_chat_model(spec: ProviderSpec) -> Any:
             # uno remoto sí, y hornear la credencial aquí era justo lo que impedía
             # apuntar a otro endpoint sin tocar código.
             api_key=spec.api_key or "ignored",
-            temperature=spec.temperature,
+            # `None` hace que el cliente omita el parámetro: hay modelos de razonamiento
+            # que solo aceptan la temperatura por defecto y rechazan cualquier otra.
+            temperature=None if spec.extra.get("sin_temperatura") else spec.temperature,
             max_tokens=spec.max_tokens,
             timeout=spec.timeout_efectivo,
             max_retries=spec.reintentos_efectivos,
@@ -322,6 +349,7 @@ def construir_sentence_transformer(*, model_name: str, device: str) -> Any:
 
 def build_embedding_backend(spec: ProviderSpec) -> Any:
     """Construye el backend de embeddings, con la interfaz `EmbeddingBackend`."""
+    original = spec
     spec = spec.resuelto()
     if not spec.capacidades.embeddings:
         raise ProviderConfigError(
@@ -332,10 +360,15 @@ def build_embedding_backend(spec: ProviderSpec) -> Any:
     if spec.proveedor is Provider.DMR:
         from .embeddings import LangChainDMREmbeddings
 
+        # Se resuelve desde el spec ORIGINAL, no desde el resuelto: `resuelto()` rellena
+        # `modelo` con el default de chat (el de Vertex) y `base_url`/`api_key` con los del
+        # LLM, y como la UI gana a todo, `EMBED_MODEL`, `EMBED_BASE_URL` y `EMBED_API_KEY`
+        # del entorno quedaban ignorados: los embeddings iban con el nombre de un modelo de
+        # chat, a la URL local y con la clave del LLM.
         return LangChainDMREmbeddings(
-            model=spec.modelo or get("EMBED_MODEL", default=DMR_EMBED_MODEL),
-            base_url=get("EMBED_BASE_URL", ui=spec.base_url, default=DMR_BASE_URL),
-            api_key=get("EMBED_API_KEY", ui=spec.api_key, default="") or "ignored",
+            model=original.modelo or get("EMBED_MODEL", default=DMR_EMBED_MODEL),
+            base_url=get("EMBED_BASE_URL", ui=original.base_url, default=spec.base_url),
+            api_key=get("EMBED_API_KEY", ui=original.api_key, default="") or "ignored",
             batch_size=spec.batch_size,
         )
 

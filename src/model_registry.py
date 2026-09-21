@@ -76,7 +76,7 @@ def validar_modelo(spec: ProviderSpec, model_id: str) -> None:
     obliga a adivinar, y adivinar contra un endpoint es lo que produce corridas tiradas.
     """
     spec = spec.resuelto()
-    if not spec.capacidades.listado_modelos:
+    if not spec.capacidades.listado_modelos or spec.extra.get("sin_listado"):
         # Sin endpoint de listado no se puede afirmar que falte. Callar es correcto:
         # inventar un error donde no hay evidencia es peor que no comprobar.
         logger.debug("El proveedor %s no expone listado; se omite la validación",
