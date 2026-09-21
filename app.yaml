@@ -46,7 +46,7 @@ env:
     value: "REEMPLAZAR-usuario"
   - name: "AUTH_PASSWORD"
     valueFrom: "auth_password"          # App resources → Secret → resource name "auth_password"
-  # SESSION_SECRET_KEY (documentada en .env_example) no la lee ningún código: el login
+  # SESSION_SECRET_KEY (que figuraba en el antiguo .env_example) no la lee ningún código: el login
   # de streamlit_app.py vive en app/auth.py y usa st.session_state, sin firma. La firma
   # HMAC de sesión SÍ existe, pero en api/security.py (la API FastAPI, no desplegada por
   # este app.yaml) bajo el nombre AUTH_SECRET_KEY — otro nombre. Si en algún momento se
