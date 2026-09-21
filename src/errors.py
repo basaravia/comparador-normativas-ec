@@ -205,6 +205,25 @@ def classify_llm_exception(
             modelo=modelo, url=url, causa=exc,
         )
 
+    # 1 bis · El proveedor de nube responde 404 porque el modelo no existe o la clave no
+    #     tiene acceso ("The model `x` does not exist or you do not have access to it",
+    #     Groq; equivalente en OpenRouter/Azure). `langchain_openai` lo lanza como
+    #     `OpenAIModelNotFoundError`, un `openai.NotFoundError` cuyo texto no contiene
+    #     ninguna de las señales de arriba: salía como "Error no clasificado del backend"
+    #     cuando un modelo retirado (p. ej. `qwen/qwen3.6-27b` en Groq) dejaba la
+    #     configuración apuntando a algo que ya no existe. La acción del operador es
+    #     corregir el nombre del modelo, no revisar la red.
+    if nombre == "OpenAIModelNotFoundError" or (
+        nombre == "NotFoundError" and "model" in texto
+        and ("does not exist" in texto or "not found" in texto)
+    ):
+        return ModelNotFoundError(
+            f"El modelo {modelo!r} no existe en el proveedor o la clave no tiene acceso a "
+            f"él. Revisa el modelo configurado (GROQ_LLM_MODEL, OPENROUTER_LLM_MODEL o "
+            f"DMR_LLM_MODEL): {exc}",
+            modelo=modelo, url=url, causa=exc,
+        )
+
     # 2 · Fallos de parseo del esquema. Contenido, no infraestructura.
     if nombre in ("OutputParserException", "ValidationError"):
         return GradingParseError(

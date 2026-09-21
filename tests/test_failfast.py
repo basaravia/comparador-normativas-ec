@@ -51,6 +51,32 @@ class TestClasificacion:
         assert "smollm2" in str(error)
         assert "localhost:12434" in str(error), "el mensaje debe decir qué endpoint falló"
 
+    def test_modelo_inexistente_en_la_nube_se_nombra_y_apunta_a_la_configuracion(self):
+        """Groq devuelve 404 "The model `x` does not exist or you do not have access to
+        it" cuando un modelo se retira. Salía como "Error no clasificado del backend
+        (OpenAIModelNotFoundError)", que no dice que lo que hay que cambiar es el nombre
+        del modelo. Sigue abortando, pero diciendo qué revisar."""
+        from langchain_openai.chat_models.base import OpenAIModelNotFoundError
+        exc = OpenAIModelNotFoundError(
+            "Error code: 404 - {'error': {'message': 'The model `qwen/qwen3.6-27b` does "
+            "not exist or you do not have access to it.'}}",
+            response=_respuesta(404), body=None,
+        )
+        error = classify_llm_exception(exc, modelo="qwen/qwen3.6-27b",
+                                       url="https://api.groq.com/openai/v1")
+        assert isinstance(error, ModelNotFoundError)
+        assert isinstance(error, LLMUnavailableError), "sigue abortando la corrida"
+        assert "GROQ_LLM_MODEL" in str(error)
+        assert "qwen/qwen3.6-27b" in str(error)
+        assert "no clasificado" not in str(error)
+
+    def test_un_404_de_otra_cosa_no_se_confunde_con_modelo_inexistente(self):
+        exc = openai.NotFoundError("Error code: 404 - ruta no encontrada",
+                                   response=_respuesta(404), body=None)
+        error = classify_llm_exception(exc, modelo="m", url="http://x")
+        assert not isinstance(error, ModelNotFoundError)
+        assert isinstance(error, LLMUnavailableError)
+
     def test_fallo_de_parseo_es_contenido(self):
         exc = OutputParserException("no se pudo parsear el JSON")
         error = classify_llm_exception(exc)
