@@ -186,6 +186,16 @@ def _links_desde_via1(
     return enlaces
 
 
+def _norm_jerarquia(valor) -> str:
+    """Forma comparable de una jerarquía de sección.
+
+    El modelo cita la sección de memoria y una diferencia de mayúsculas o de espacios
+    ("4.1  Conocimiento del cliente") dejaba la arista sin confirmar aunque hablara de la
+    misma sección: el artículo salía "cubierto" sin ninguna sección que lo respaldara.
+    """
+    return " ".join(str(valor).split()).casefold()
+
+
 def _links_desde_via2(
     articulo: dict,
     secciones: list[dict],
@@ -193,7 +203,7 @@ def _links_desde_via2(
     workspace_id: str,
 ) -> list[CoverageLink]:
     """Aristas que produce analizar un artículo."""
-    relevantes = set(getattr(veredicto, "secciones_relevantes", []) or [])
+    relevantes = {_norm_jerarquia(r) for r in getattr(veredicto, "secciones_relevantes", []) or []}
     nivel_adopcion = getattr(veredicto, "nivel_adopcion", None)
 
     return [
@@ -216,7 +226,7 @@ def _links_desde_via2(
             # nombrada marcaba las 5 como relevantes, inflando la cobertura con falsos
             # positivos. Sin evidencia de esa sección puntual, queda None (sin evaluar),
             # no True.
-            relevante=True if str(s.get("jerarquia", "")) in relevantes else None,
+            relevante=True if _norm_jerarquia(s.get("jerarquia", "")) in relevantes else None,
             razon=getattr(veredicto, "analisis_adopcion", "")[:200],
         )
         for s in secciones

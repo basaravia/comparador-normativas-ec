@@ -53,6 +53,12 @@ MOTIVO_VEREDICTO_INDETERMINADO = "veredicto_indeterminado"
 MOTIVO_CONFLICTO_LEXICO_SEMANTICO = "conflicto_lexico_semantico"
 MOTIVO_ARTICULO_SIN_COBERTURA = "articulo_sin_cobertura"
 MOTIVO_PARCIAL_CON_BRECHAS = "parcial_con_brechas"
+# Los dos que produce `vista_normativa` a partir del veredicto de adopción del artículo:
+# el modelo puede sacar un artículo del denominador (`no_aplica`) o darlo por cubierto sin
+# nombrar ninguna sección, y en ninguno de los dos casos hay evidencia que el auditor
+# pueda seguir sin que se le avise.
+MOTIVO_ARTICULO_NO_APLICA = "articulo_no_aplica"
+MOTIVO_CUBIERTO_SIN_EVIDENCIA = "cubierto_sin_evidencia"
 # Producidos aguas arriba (`dual`, `llm_grader`), se listan aquí para que el vocabulario
 # viva en un solo módulo.
 MOTIVO_CITA_AMBIGUA = "cita_ambigua"
@@ -541,13 +547,6 @@ def vista_normativa(tabla: LinkTable, normativa_df: pd.DataFrame,
         element_id = art.get("element_id", "")
         enlaces = tabla.por_articulo(element_id)
         confirmados = [e for e in enlaces if e.relevante is True]
-        # Un artículo sin cobertura confirmada se revisa siempre: no tener candidatos
-        # —o tenerlos y que ninguno resultara relevante— no es haber comprobado que no le
-        # aplica nada. Es el disparador `articulo_sin_cobertura` del ítem 10, y la
-        # condición tiene que ser la misma que la del motivo de abajo: un artículo que
-        # listara el motivo sin quedar marcado no aparecería en el filtro "Solo revisión
-        # manual", que es donde alguien iría a buscarlo.
-        revisar = any(e.requiere_revision_manual for e in enlaces) or not confirmados
         # `nivel_adopcion` (cubierto/parcial/no_cubierto/no_aplica, de
         # `AdopcionResult`) es el veredicto real del ítem 6; antes esta vista solo
         # exponía el booleano `cubierto`, que colapsaba "parcial" en uno de los dos
@@ -579,12 +578,37 @@ def vista_normativa(tabla: LinkTable, normativa_df: pd.DataFrame,
         # Sin veredicto de Vía 2 —corrida de una sola vía, o un grading que no llegó a
         # `analizar_adopcion`— se cae al booleano de relevancia, que es lo único que hay.
         # Es más laxo, y por eso queda explícito en la columna `origen_cubierto`.
+        #
+        # Un "cubierto" sin ninguna sección confirmada tampoco cuenta: el modelo afirma que
+        # la obligación está implementada pero no nombró dónde (o la sección que nombró no
+        # coincidió con ninguna candidata), y un cumplimiento que nadie puede señalar en el
+        # manual no es verificable. Se reporta con su propio motivo en vez de sumarlo en
+        # silencio al numerador.
         if nivel_adopcion is None:
             cubierto = bool(confirmados)
             origen_cubierto = "relevancia"
         else:
-            cubierto = nivel_adopcion == "cubierto"
+            cubierto = nivel_adopcion == "cubierto" and bool(confirmados)
             origen_cubierto = "adopcion"
+        cubierto_sin_evidencia = nivel_adopcion == "cubierto" and not confirmados
+
+        # Motivos que solo ve quien mira el artículo entero (los de arista los trae cada
+        # enlace). `no_aplica` reemplaza a `articulo_sin_cobertura`: un artículo declarado
+        # fuera del perímetro no está "sin cobertura", pero como el modelo lo saca del
+        # denominador por su cuenta, el auditor tiene que confirmarlo.
+        motivos_articulo: set[str] = set()
+        if nivel_adopcion == "no_aplica":
+            motivos_articulo.add(MOTIVO_ARTICULO_NO_APLICA)
+        elif not confirmados:
+            motivos_articulo.add(MOTIVO_ARTICULO_SIN_COBERTURA)
+        if cubierto_sin_evidencia:
+            motivos_articulo.add(MOTIVO_CUBIERTO_SIN_EVIDENCIA)
+        # Un artículo sin cobertura confirmada se revisa siempre: no tener candidatos
+        # —o tenerlos y que ninguno resultara relevante— no es haber comprobado que no le
+        # aplica nada. La condición tiene que ser la misma que la de los motivos: un
+        # artículo que listara el motivo sin quedar marcado no aparecería en el filtro
+        # "Solo revisión manual", que es donde alguien iría a buscarlo.
+        revisar = any(e.requiere_revision_manual for e in enlaces) or bool(motivos_articulo)
         filas.append({
             "element_id": element_id,
             "articulo_doc_id": art.get("doc_id", ""),
@@ -605,11 +629,17 @@ def vista_normativa(tabla: LinkTable, normativa_df: pd.DataFrame,
             "requiere_revision": revisar,
             "requiere_revision_manual": revisar,
             "motivos_revision": sorted(
-                {m for e in enlaces for m in e.motivos_revision}
-                | ({MOTIVO_ARTICULO_SIN_COBERTURA} if not confirmados else set())
+                {m for e in enlaces for m in e.motivos_revision} | motivos_articulo
             ),
         })
-    return pd.DataFrame(filas)
+    vista = pd.DataFrame(filas)
+    if not vista.empty:
+        # Con pandas 3 una columna de texto con huecos guarda los `None` como `NaN`, y
+        # `NaN` es truthy y sale como "nan" en el Excel: la ausencia de veredicto tiene que
+        # seguir siendo `None`, que es lo que los consumidores comprueban.
+        nivel = vista["nivel_adopcion"].astype(object)
+        vista["nivel_adopcion"] = nivel.where(nivel.notna(), None)
+    return vista
 
 
 @dataclass(frozen=True)

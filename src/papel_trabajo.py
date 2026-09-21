@@ -48,6 +48,18 @@ def _calcular_prioridad(nivel: str, plantilla: dict[str, Any]) -> str:
     return prioridades.get(nivel_norm, prioridades.get("default", "Media"))
 
 
+def _nivel_adopcion_de(row: Any) -> str:
+    """Veredicto de adopción de una fila de la vista, o el que se deduce de `cubierto`.
+
+    La columna existe siempre, así que el `default` de `row.get(...)` nunca se aplicaba: sin
+    veredicto llegaba `None` (o `NaN` con pandas 3) y salía "none"/"nan" en el Excel.
+    """
+    nivel = row.get("nivel_adopcion")
+    if nivel is None or pd.isna(nivel) or nivel == "":
+        return "cubierto" if row.get("cubierto") else "no_cubierto"
+    return str(nivel)
+
+
 def _aplanar_valor(val: Any) -> str:
     """Aplana listas, tuplas o diccionarios a cadenas de texto legibles para celdas."""
     if isinstance(val, (list, tuple, set)):
@@ -240,7 +252,8 @@ def generar_papel_trabajo(
 
         if not df_v2.empty:
             for r_idx, (_, row) in enumerate(df_v2.iterrows(), start=2):
-                nivel = str(row.get("nivel_adopcion", "cubierto" if row.get("cubierto") else "no_cubierto")).lower()
+                nivel_fila = _nivel_adopcion_de(row)
+                nivel = nivel_fila.lower()
                 prioridad = _calcular_prioridad(nivel, plantilla)
                 fila_datos = []
                 for c in cols_v2:
@@ -248,7 +261,7 @@ def generar_papel_trabajo(
                     if cid == "prioridad":
                         fila_datos.append(prioridad)
                     elif cid == "nivel_adopcion":
-                        fila_datos.append(row.get("nivel_adopcion", "cubierto" if row.get("cubierto") else "no_cubierto"))
+                        fila_datos.append(nivel_fila)
                     else:
                         fila_datos.append(_aplanar_valor(row.get(cid, "")))
                 ws_v2.append(fila_datos)

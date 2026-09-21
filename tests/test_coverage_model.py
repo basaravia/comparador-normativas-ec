@@ -298,3 +298,100 @@ class TestPersistencia:
         destino = cobertura_global(LinkTable(), normativa_df).guardar(tmp_path / "c.json")
         d = json.loads(destino.read_text(encoding="utf-8"))
         assert "porcentaje" in d and "sin_cobertura" in d and "version_esquema" in d
+
+
+class TestVeredictosQueNoSePuedenAceptarEnSilencio:
+    """El modelo puede sacar un artículo del denominador (`no_aplica`) o darlo por cubierto
+    sin nombrar dónde. En ninguno de los dos casos hay evidencia que el auditor pueda seguir
+    sin que se le avise."""
+
+    def _un_articulo(self, normativa_df):
+        arts = normativa_df[(normativa_df["tipo_elemento"] == "articulo")
+                            & (~normativa_df["es_referencia"])]
+        return arts.iloc[0]["element_id"]
+
+    def test_no_aplica_pide_revision_manual_con_su_propio_motivo(self, normativa_df):
+        from src.coverage import MOTIVO_ARTICULO_NO_APLICA, MOTIVO_ARTICULO_SIN_COBERTURA
+        art = self._un_articulo(normativa_df)
+        t = LinkTable([_link(art=art, sec="S1", relevante=None, nivel_adopcion="no_aplica")])
+        fila = vista_normativa(t, normativa_df).set_index("element_id").loc[art]
+        assert bool(fila["requiere_revision_manual"]) is True
+        assert MOTIVO_ARTICULO_NO_APLICA in fila["motivos_revision"]
+        assert MOTIVO_ARTICULO_SIN_COBERTURA not in fila["motivos_revision"], (
+            "un artículo declarado fuera del perímetro no está 'sin cobertura'"
+        )
+
+    def test_no_aplica_sigue_saliendo_del_denominador(self, normativa_df):
+        art = self._un_articulo(normativa_df)
+        t = LinkTable([_link(art=art, sec="S1", nivel_adopcion="no_aplica")])
+        c = cobertura_global(t, normativa_df)
+        assert [a["element_id"] for a in c.no_aplican] == [art]
+
+    def test_cubierto_sin_ninguna_seccion_confirmada_no_cuenta(self, normativa_df):
+        from src.coverage import MOTIVO_CUBIERTO_SIN_EVIDENCIA
+        art = self._un_articulo(normativa_df)
+        t = LinkTable([_link(art=art, sec="S1", relevante=None, nivel_adopcion="cubierto")])
+        fila = vista_normativa(t, normativa_df).set_index("element_id").loc[art]
+        assert bool(fila["cubierto"]) is False
+        assert bool(fila["requiere_revision_manual"]) is True
+        assert MOTIVO_CUBIERTO_SIN_EVIDENCIA in fila["motivos_revision"]
+        assert cobertura_global(t, normativa_df).cubiertos == 0
+
+    def test_cubierto_con_seccion_confirmada_sigue_contando_y_sin_motivo(self, normativa_df):
+        from src.coverage import MOTIVO_CUBIERTO_SIN_EVIDENCIA
+        art = self._un_articulo(normativa_df)
+        t = LinkTable([_link(art=art, sec="S1", relevante=True, nivel_adopcion="cubierto")])
+        fila = vista_normativa(t, normativa_df).set_index("element_id").loc[art]
+        assert bool(fila["cubierto"]) is True
+        assert MOTIVO_CUBIERTO_SIN_EVIDENCIA not in fila["motivos_revision"]
+
+
+class TestAusenciaDeVeredictoSigueSiendoNone:
+    """Con pandas 3 una columna de texto con huecos guarda `None` como `NaN`, que es truthy
+    y salía como "nan" en el Excel."""
+
+    def test_la_columna_mezclada_conserva_none(self, normativa_df):
+        arts = normativa_df[(normativa_df["tipo_elemento"] == "articulo")
+                            & (~normativa_df["es_referencia"])]
+        primero = arts.iloc[0]["element_id"]
+        t = LinkTable([_link(art=primero, sec="S1", relevante=True)])   # sin veredicto
+        vista = vista_normativa(t, normativa_df).set_index("element_id")
+        assert vista.loc[primero, "nivel_adopcion"] is None
+        # Los demás artículos sin aristas sí traen veredicto ("no_cubierto"): la columna
+        # queda mezclada a propósito, que es justo el caso en que pandas 3 la vuelve NaN.
+        otros = vista.drop(index=primero)
+        assert len(otros) > 0 and (otros["nivel_adopcion"] == "no_cubierto").all()
+
+    def test_el_excel_no_escribe_nan_ni_none(self):
+        import pandas as pd
+
+        from src.papel_trabajo import _nivel_adopcion_de
+        assert _nivel_adopcion_de({"nivel_adopcion": None, "cubierto": True}) == "cubierto"
+        assert _nivel_adopcion_de({"nivel_adopcion": float("nan"), "cubierto": False}) == "no_cubierto"
+        assert _nivel_adopcion_de(pd.Series({"nivel_adopcion": pd.NA, "cubierto": True})) == "cubierto"
+        assert _nivel_adopcion_de({"nivel_adopcion": "parcial", "cubierto": False}) == "parcial"
+
+
+class TestJerarquiaCitadaPorElModelo:
+    """El modelo cita la sección de memoria: una diferencia de mayúsculas o de espacios
+    dejaba la arista sin confirmar aunque hablara de la misma sección."""
+
+    def _via2(self, citada):
+        from types import SimpleNamespace
+
+        from src.dual import _links_desde_via2
+        veredicto = SimpleNamespace(secciones_relevantes=[citada], nivel_adopcion="cubierto",
+                                    analisis_adopcion="ok")
+        articulo = {"element_id": "a1", "doc_id": DOC_LEY, "numero": "8"}
+        secciones = [{"chunk_id": "c1", "doc_id": "M.pdf",
+                      "jerarquia": "4.1 Conocimiento del cliente", "similarity": 0.8}]
+        return _links_desde_via2(articulo, secciones, veredicto, "ws")[0]
+
+    def test_coincidencia_exacta(self):
+        assert self._via2("4.1 Conocimiento del cliente").relevante is True
+
+    def test_tolera_mayusculas_y_espacios_de_mas(self):
+        assert self._via2("  4.1   CONOCIMIENTO del  cliente ").relevante is True
+
+    def test_una_seccion_distinta_no_se_confirma(self):
+        assert self._via2("5.2 Otra sección").relevante is None
