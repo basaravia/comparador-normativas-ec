@@ -43,6 +43,7 @@ numpy>=1.26.0
 tqdm>=4.66.0
 pydantic>=2.10.0
 python-dotenv>=1.0.0
+pyyaml>=6.0                     # config/perfiles.yaml y templates/papel_trabajo.yaml
 
 # Streamlit: la UI ya no se despliega (salió de esta rama), PERO se mantiene como
 # dependencia porque app/logging_utils.py hace `import streamlit` a nivel de módulo y

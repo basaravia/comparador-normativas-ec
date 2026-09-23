@@ -19,6 +19,8 @@ de marca. **No** incluye `.env`, `Normativa2026/`, los manuales reales de `docum
   va como secreto: crear `foundry_ai_token` y asociarlo en *App resources* con ese mismo nombre.
   Es el **único** secreto que pide el `app.yaml` tal como está; Vertex, Groq, OpenRouter y el
   login están comentados porque cada `valueFrom` exige que su secreto exista.
+- **`MODEL_PROFILE`** (en `app.yaml`) elige el backend: `foundry` por defecto ahí. Los perfiles están
+  en `backend/config/perfiles.yaml`, que viaja dentro de `backend/`.
 - **`AUTH_ENABLED`** está en `"false"` porque la interfaz mínima no tiene login. Databricks Apps
   ya pone su propio acceso por workspace delante, pero confírmalo antes de exponerla. Cuando
   vuelva el login: `"true"` + secreto `AUTH_SECRET_KEY`.

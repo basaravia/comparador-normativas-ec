@@ -6,10 +6,13 @@ import os
 import platform
 from fastapi import APIRouter
 
-from api.schemas import HealthResponse, ProviderInfo, ProvidersResponse
+from api.schemas import HealthResponse, PerfilActivo, ProviderInfo, ProvidersResponse
 from src import config as cfg
+from src.errors import ProviderConfigError
 from src.model_registry import modelos_disponibles
+from src.perfiles import perfil_activo
 from src.providers import Provider, ProviderSpec, resolve_device
+from src.service import ServiceConfig
 from src.settings import get as get_setting
 
 router = APIRouter(prefix="/api", tags=["Sistema y Proveedores"])
@@ -119,8 +122,24 @@ def get_providers() -> ProvidersResponse:
         ),
     ]
 
+    perfil, perfil_error = None, None
+    try:
+        p = perfil_activo()
+        efectivo = ServiceConfig()  # aplica LLM_BACKEND / EMBED_BACKEND sobre el perfil
+        perfil = PerfilActivo(
+            nombre=p.nombre,
+            llm=efectivo.llm_backend_kind,
+            embeddings=efectivo.embed_backend_kind,
+            con_override=(efectivo.llm_backend_kind != p.llm
+                          or efectivo.embed_backend_kind != p.embeddings),
+        )
+    except ProviderConfigError as e:
+        perfil_error = str(e)
+
     return ProvidersResponse(
         providers=providers,
+        perfil=perfil,
+        perfil_error=perfil_error,
         default_llm=getattr(cfg, "VERTEX_LLM_MODEL", "gemini-3.5-flash-lite"),
         default_embed=getattr(cfg, "OLLAMA_EMBED_MODEL", "qwen3-embedding:0.6b"),
     )

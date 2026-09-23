@@ -3,6 +3,8 @@ import { useAppStore } from '@/store/useAppStore'
 
 export default function Header() {
   const health = useAppStore((s) => s.serverHealth)
+  const perfil = useAppStore((s) => s.perfil)
+  const perfilError = useAppStore((s) => s.perfilError)
 
   return (
     <header className="bg-surface border-b border-border sticky top-0 z-30 shadow-sm">
@@ -27,6 +29,19 @@ export default function Header() {
         </div>
 
         <div className="flex items-center space-x-2 sm:space-x-3">
+          {(perfil || perfilError) && (
+            <div
+              className={`hidden md:flex items-center px-2.5 py-1 rounded-md border text-xs gap-1.5 ${
+                perfilError ? 'bg-rose-50 border-rose-200 text-rose-800' : 'bg-canvas border-border text-content-muted'
+              }`}
+              title={perfilError ?? `LLM: ${perfil?.llm} · Embeddings: ${perfil?.embeddings} · Reranker: local`}
+            >
+              <span className="font-medium">Perfil</span>
+              <span className="font-mono text-primary">{perfilError ? 'inválido' : perfil?.nombre}</span>
+              {perfil?.con_override && <span title="LLM_BACKEND o EMBED_BACKEND fuerzan un eje">*</span>}
+            </div>
+          )}
+
           {health && (
             <div className="hidden md:flex items-center px-2.5 py-1 rounded-md bg-canvas border border-border text-xs text-content-muted gap-1.5">
               <Cpu className="w-3.5 h-3.5 text-primary" />

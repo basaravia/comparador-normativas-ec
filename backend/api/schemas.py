@@ -21,10 +21,22 @@ class ProviderInfo(BaseModel):
     detalles: str = ""
 
 
+class PerfilActivo(BaseModel):
+    """Perfil de modelos vigente (config/perfiles.yaml) y los backends efectivos."""
+    nombre: str
+    llm: str
+    embeddings: str
+    # True si LLM_BACKEND / EMBED_BACKEND fuerzan un eje distinto al del perfil.
+    con_override: bool = False
+
+
 class ProvidersResponse(BaseModel):
     providers: List[ProviderInfo]
     default_llm: str
     default_embed: str
+    perfil: Optional[PerfilActivo] = None
+    # Si el perfil no se pudo resolver (YAML inválido, perfil inexistente…), el motivo.
+    perfil_error: Optional[str] = None
 
 
 class DocumentItem(BaseModel):

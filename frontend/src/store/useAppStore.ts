@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { ApiError, api, post, urls } from '@/api/client'
 import type {
   DocumentItem,
+  PerfilActivo,
   RunStatus,
   SearchResultItem,
   ServerHealth,
@@ -22,6 +23,8 @@ interface AppState {
 
   // Sistema
   serverHealth: ServerHealth | null
+  perfil: PerfilActivo | null
+  perfilError: string | null
 
   // Documentos
   normativas: DocumentItem[]
@@ -76,6 +79,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   error: null,
 
   serverHealth: null,
+  perfil: null,
+  perfilError: null,
 
   normativas: [],
   manuales: [],
@@ -124,6 +129,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   async fetchHealth() {
     try {
       set({ serverHealth: await api<ServerHealth>('/api/health') })
+      const cat = await api<{ perfil: PerfilActivo | null; perfil_error: string | null }>('/api/config/providers')
+      set({ perfil: cat.perfil, perfilError: cat.perfil_error })
     } catch (e) {
       console.error('health:', e)
     }

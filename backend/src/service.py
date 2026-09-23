@@ -50,6 +50,7 @@ from .config import (
 from .document_parser import ManualParser, NormativaParser
 from .errors import ProviderConfigError
 from .llm_grader import LLMGrader
+from .perfiles import _ALIAS_EMBED, EMBED_BACKENDS, LLM_BACKENDS, perfil_activo
 from .providers import Provider, ProviderSpec, build_chat_model, build_embedding_backend
 from .search_engine import NormativaIndex
 from .settings import get as _get_setting
@@ -61,18 +62,19 @@ RAIZ_SALIDA = Path("output")
 
 # ── Configuración ─────────────────────────────────────────────────────────────
 
-_LLM_BACKENDS = ("vertex", "openrouter", "groq", "foundry")
-_EMBED_BACKENDS = ("remoto", "local", "vertex", "foundry")
+def _backend(variable: str, validos: tuple[str, ...], campo_perfil: str) -> str:
+    """Backend de un eje del pipeline: la variable explícita gana al perfil activo.
 
-
-def _backend_desde_entorno(variable: str, validos: tuple[str, ...], default: str) -> str:
-    """Backend elegido por variable de entorno (`LLM_BACKEND` / `EMBED_BACKEND`).
-
-    Existe para que quien no puede mandar `llm_backend_kind` en cada petición —la interfaz
-    mínima no lo envía— elija el proveedor solo con el `.env`. Vacío = el default de siempre.
-    Un valor desconocido falla nombrando la variable, en vez de caer callado en otro backend.
+    `LLM_BACKEND` / `EMBED_BACKEND` son el escape para forzar un eje sin tocar el YAML; sin
+    ellas manda el perfil (`MODEL_PROFILE` o `activo` de config/perfiles.yaml). Existe para
+    que quien no puede mandar `llm_backend_kind` en cada petición —la interfaz mínima no lo
+    envía— elija el proveedor por configuración. Un valor desconocido falla nombrando la
+    variable, en vez de caer callado en otro backend.
     """
-    valor = str(_get_setting(variable, default="") or "").strip().lower() or default
+    valor = str(_get_setting(variable, default="") or "").strip().lower()
+    if not valor:
+        return getattr(perfil_activo(), campo_perfil)
+    valor = _ALIAS_EMBED.get(valor, valor)
     if valor not in validos:
         raise ProviderConfigError(
             f"{variable}={valor!r} no es válido; usa uno de: {', '.join(validos)}"
@@ -94,11 +96,11 @@ class ServiceConfig:
     llm_model: str | None = None
     embed_model: str | None = None
     base_url: str | None = None
-    # Default desde EMBED_BACKEND / LLM_BACKEND del entorno; sin ellas, "remoto" y "vertex".
+    # Default: EMBED_BACKEND / LLM_BACKEND si existen; si no, el perfil activo (ver perfiles.py).
     embed_backend_kind: str = field(   # "remoto" | "local" | "vertex" | "foundry"
-        default_factory=lambda: _backend_desde_entorno("EMBED_BACKEND", _EMBED_BACKENDS, "remoto"))
-    llm_backend_kind: str = field(     # "vertex" | "openrouter" | "groq" | "foundry"
-        default_factory=lambda: _backend_desde_entorno("LLM_BACKEND", _LLM_BACKENDS, "vertex"))
+        default_factory=lambda: _backend("EMBED_BACKEND", EMBED_BACKENDS, "embeddings"))
+    llm_backend_kind: str = field(     # "vertex" | "openrouter" | "groq" | "foundry" | "local"
+        default_factory=lambda: _backend("LLM_BACKEND", LLM_BACKENDS, "llm"))
     llm_base_url: str | None = None
     llm_api_key: str | None = None
 
@@ -291,7 +293,7 @@ def construir_comparador(indice: NormativaIndex, config: ServiceConfig) -> Docum
     AI, con su propia auth (ADC). `config.llm_model=None` deja que `ProviderSpec.resuelto()`
     resuelva `VERTEX_LLM_MODEL` desde entorno/default, igual que ya hacía para DMR.
 
-    `llm_backend_kind` en {"openrouter", "groq"} reutiliza el mismo `Provider.DMR`
+    `llm_backend_kind` en {"openrouter", "groq", "local"} reutiliza el mismo `Provider.DMR`
     (openai-compat genérico) que ya usan los embeddings locales — ambos exponen la
     API de OpenAI, solo cambian `base_url`/`api_key`. "foundry" usa `Provider.AZURE`
     (`AzureChatOpenAI`): la api-version y el deployment no caben en un openai-compat.
@@ -304,9 +306,26 @@ def construir_comparador(indice: NormativaIndex, config: ServiceConfig) -> Docum
     Groq solo, como hasta ahora — nadie tiene que pedirlo explícito.
     """
     respaldo_spec = None
-    if config.llm_backend_kind in ("openrouter", "groq", "foundry"):
+    if config.llm_backend_kind in ("openrouter", "groq", "foundry", "local"):
         es_groq = config.llm_backend_kind == "groq"
-        if config.llm_backend_kind == "foundry":
+        if config.llm_backend_kind == "local":
+            # Ollama por el cliente openai-compat. No hay modelo por defecto que valga: el
+            # `DMR_LLM_MODEL` histórico es el de Vertex y Ollama contestaría "modelo no
+            # encontrado" sin decir de dónde salió el nombre.
+            modelo = config.llm_model or _get_setting("DMR_LLM_MODEL", default="")
+            if not modelo:
+                raise ProviderConfigError(
+                    "Falta el modelo del LLM local: define DMR_LLM_MODEL con un modelo de "
+                    "`ollama list` (el valor por defecto es el de Vertex)."
+                )
+            spec = ProviderSpec(
+                proveedor=Provider.DMR,
+                modelo=modelo,
+                base_url=config.llm_base_url,
+                temperature=config.temperature,
+                api_key=config.llm_api_key,
+            )
+        elif config.llm_backend_kind == "foundry":
             # Azure AI Foundry por la vía clásica (endpoint + clave + api-version +
             # deployment): `Provider.AZURE` → `AzureChatOpenAI`. Endpoint, clave, api-version
             # y deployment salen de FOUNDRY_AI_*; `llm_base_url`/`llm_api_key`/`llm_model`

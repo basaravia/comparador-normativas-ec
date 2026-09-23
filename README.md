@@ -48,6 +48,14 @@ AUTH_ENABLED=false uvicorn api.main:app --app-dir backend --reload   # API en :8
 (cd frontend && npm install && npm run dev)                          # UI en :5173, proxy a :8000
 ```
 
+### Perfiles de modelos
+
+Un parámetro elige el backend del LLM y de los embeddings: `MODEL_PROFILE` en el `.env` (o
+`activo` en `backend/config/perfiles.yaml`). Perfiles incluidos: `default` (Vertex + Ollama),
+`foundry`, `local` (Ollama), `local_groq` y `personalizado` (editable). El reranker es siempre
+local. Las credenciales y modelos siguen en sus variables; el YAML no lleva secretos.
+Detalle y precedencia en `.env.example` y en el propio YAML.
+
 La UI mínima no tiene login: con `AUTH_ENABLED=true` la API responde 401 y la UI muestra un aviso.
 Para servir el front desde FastAPI (como en producción): `cd frontend && npm run build` y abrir `:8000`.
 

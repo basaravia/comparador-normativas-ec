@@ -24,9 +24,9 @@ env:
   # Sustituir los REEMPLAZAR-*. Detalle de cada variable en .env.example.
   # La clave es secreta: databricks secrets put-secret <scope> foundry_ai_token --string-value "<clave>"
   # y en App resources → Add resource → Secret, con resource name "foundry_ai_token".
-  - name: "LLM_BACKEND"
-    value: "foundry"
-  - name: "EMBED_BACKEND"
+  # Perfil de modelos (backend/config/perfiles.yaml): foundry | default | local | local_groq |
+  # personalizado. Para forzar un solo eje: LLM_BACKEND / EMBED_BACKEND.
+  - name: "MODEL_PROFILE"
     value: "foundry"
   - name: "FOUNDRY_AI_ENDPOINT"
     value: "REEMPLAZAR-https://<recurso>.openai.azure.com"
@@ -40,7 +40,7 @@ env:
     value: "REEMPLAZAR-deployment-de-embeddings"
 
   # ── Alternativas (comentadas): cada `valueFrom` exige que exista ese secreto en la App ──
-  # Para usar Vertex/Groq/OpenRouter, descomentar y poner LLM_BACKEND/EMBED_BACKEND en consecuencia.
+  # Para usar Vertex/Groq/OpenRouter, descomentar y elegir el MODEL_PROFILE que corresponda.
   # ── Vertex AI (LLM de grading + embeddings, Provider.VERTEX) ────────────────
   # VERTEX_PROJECT_ID / VERTEX_LOCATION no son secretos: reemplazar el placeholder.
   # - name: "VERTEX_PROJECT_ID"

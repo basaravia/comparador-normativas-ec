@@ -38,6 +38,13 @@ export interface RunStatus {
   total_revision_manual: number
 }
 
+export interface PerfilActivo {
+  nombre: string
+  llm: string
+  embeddings: string
+  con_override: boolean
+}
+
 export interface ServerHealth {
   status: string
   version?: string

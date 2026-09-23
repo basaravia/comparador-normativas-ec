@@ -1,0 +1,49 @@
+# Perfiles de modelos: un solo parámetro decide qué backend usa cada pieza del pipeline.
+#
+#   activo: <perfil>     se sobrescribe con la variable de entorno MODEL_PROFILE
+#
+# El perfil elige QUÉ backend se usa, no con qué credenciales ni qué modelo: eso sigue en
+# las variables de entorno (.env / app.yaml): FOUNDRY_AI_*, GROQ_*, OPENROUTER_*, DMR_*,
+# EMBED_*, VERTEX_*. Así puedes tenerlas todas rellenas y cambiar de proveedor con una línea.
+#
+# Este archivo NO lleva secretos y se versiona. Para definir otra combinación, agrega un
+# perfil o edita `personalizado`.
+#
+# Precedencia (de mayor a menor):
+#   petición de la API  >  LLM_BACKEND / EMBED_BACKEND  >  MODEL_PROFILE  >  `activo` de aquí
+#
+# Valores válidos
+#   llm:         vertex | groq | openrouter | foundry | local (Ollama; exige DMR_LLM_MODEL)
+#   embeddings:  ollama | foundry | vertex | local (sentence-transformers, exige torch)
+#
+# El reranker no se elige aquí: siempre es local (Qwen3-Reranker, multilingüe) con cualquier perfil.
+#
+# Cambiar `embeddings` invalida el índice: hay que borrar output/rag_index/ y reindexar.
+
+activo: default
+
+perfiles:
+  # Comportamiento histórico del proyecto: Vertex + embeddings locales (Ollama).
+  default:
+    llm: vertex
+    embeddings: ollama
+
+  # Todo en Azure AI Foundry (LLM y embeddings).
+  foundry:
+    llm: foundry
+    embeddings: foundry
+
+  # Todo en esta máquina, sin salir a la red: LLM y embeddings en Ollama.
+  local:
+    llm: local
+    embeddings: ollama
+
+  # LLM en Groq, embeddings locales (Groq no ofrece embeddings).
+  local_groq:
+    llm: groq
+    embeddings: ollama
+
+  # Combinación a tu medida. Ejemplo: LLM en Foundry, embeddings locales (no obliga a reindexar).
+  personalizado:
+    llm: foundry
+    embeddings: ollama

@@ -17,6 +17,8 @@ from fastapi.staticfiles import StaticFiles
 from api.routers import auth, compare, documents, health, index, theme
 from api.security import SesionRequerida, require_session
 from app.logging_utils import setup_logging
+from src.perfiles import perfil_activo
+from src.service import ServiceConfig
 
 logger = logging.getLogger("api")
 
@@ -27,6 +29,12 @@ logger = logging.getLogger("api")
 # de credenciales que exige §14. `setup_logging()` ya tolera correr sin runtime de
 # Streamlit (ver app/logging_utils.py).
 setup_logging()
+
+# Falla al arrancar, no a mitad de una corrida: un MODEL_PROFILE mal escrito, un YAML roto o un
+# LLM_BACKEND inválido abortan aquí con un mensaje que dice qué corregir.
+_efectivo = ServiceConfig()
+logger.info("Perfil de modelos: %s → llm=%s, embeddings=%s (reranker: local)",
+            perfil_activo().nombre, _efectivo.llm_backend_kind, _efectivo.embed_backend_kind)
 
 API_DESCRIPTION = """
 # 📑 Comparador Automatizado de Normativas vs Manuales Internos — API REST
