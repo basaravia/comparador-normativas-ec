@@ -1,0 +1,39 @@
+[project]
+name = "comparador-normativas-ec"
+version = "0.3.0"
+description = "Comparador automatizado de normativas ecuatorianas vs. manuales internos"
+requires-python = ">=3.11"
+readme = "README.md"
+
+# Las dependencias reales viven en dependencies/requirements.txt y
+# dependencies/environment.yml. No se duplican aquí: el entorno se construye con
+# conda por las restricciones de Apple Silicon (torch/faiss/docling), y mantener
+# dos listas en paralelo garantiza que se desincronicen.
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["src", "app", "api"]
+
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+
+# Sustituye al sys.path.insert de tests/conftest.py: hace importables `src` y `app`
+# sin que cada prueba tenga que manipular el path.
+pythonpath = ["."]
+
+markers = [
+    "e2e: pruebas end-to-end lentas que requieren un backend de modelos real",
+    "retrieval: evaluación de recuperación en español; corre sin LLM pero necesita embeddings",
+]
+
+# La suite por defecto no incluye las lentas. Para correrlas: pytest -m e2e
+addopts = "-m 'not e2e' --strict-markers"
+
+filterwarnings = [
+    "ignore::DeprecationWarning:streamlit.*",
+]

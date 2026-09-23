@@ -87,6 +87,11 @@ output/eval/
 
 # Node / Frontend dependencies
 frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+*.egg-info/
+dist-app/
 
 # Bitácora e infraestructura de red privada (NO versionar / NO publicar)
 infraestructura_red_bitacora/
+legacy/

@@ -13,7 +13,7 @@ suelto o probar un backend, no para correr el comparador completo.
 
 | Sección | Contenido |
 | --- | --- |
-| Fases 1–5 | Tabulación (Docling), índice FAISS híbrido, `LLMGrader`, `DocumentComparator` — el mismo pipeline que expone `streamlit_app.py` |
+| Fases 1–5 | Tabulación (Docling), índice FAISS híbrido, `LLMGrader`, `DocumentComparator` — el mismo pipeline que expone la API FastAPI (`backend/api/`) |
 | Uso modular | Cargar el índice FAISS desde disco y correr un análisis incremental sin re-indexar |
 | **Fase 6** | **Verificación de subsanaciones** de las olas 0-2: cada celda contrasta el defecto corregido contra el comportamiento anterior, con corpus sintético — no necesita `document_test/` ni un modelo vivo |
 | **Fase 7** | **Doble vía y modelo de cobertura (Ola 3)**: `run_dual()`, `CoverageLink`/`LinkTable`, la alerta de cobertura que solo la Vía 2 puede producir, y la verificación de que el costo es la suma de las vías, no el producto — también con corpus sintético |

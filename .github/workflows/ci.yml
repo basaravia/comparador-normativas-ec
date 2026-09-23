@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, "feature/**", "fix/**", "chore/**", "test/**"]
   pull_request:
-    branches: [main, feature/comparador-v2]
+    branches: [main, feature/comparador-v2, feature/v6-react-fastapi]
 
 # Solo la corrida más reciente de cada rama; las anteriores se cancelan.
 concurrency:
@@ -59,7 +59,25 @@ jobs:
                       fastapi uvicorn httpx python-multipart pypdfium2
 
       - name: Suite rápida
+        working-directory: backend
         run: pytest -q
+
+  frontend:
+    name: Frontend (React/Vite)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      # `build` incluye `tsc -b`: falla si los tipos no cuadran.
+      - run: npm run build
 
   # NOTA DELIBERADA — la compuerta de confidencialidad no vive aquí.
   #

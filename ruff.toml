@@ -1,0 +1,28 @@
+# Config de ruff para todo el repo (vivía en pyproject.toml antes de mover el backend a backend/).
+target-version = "py311"
+line-length = 120
+exclude = [".claude", "output", "Normativa2026", "*.ipynb", "legacy", "frontend", "dist-app"]
+
+[lint]
+# Conjunto por defecto de ruff: pyflakes (F) + los subconjuntos de pycodestyle que
+# señalan errores reales (E4 imports, E7 sentencias, E9 sintaxis).
+#
+# Deliberadamente NO se activa E501 (longitud de línea): los separadores de sección
+# del código (`# ── API pública ──…`) usan caracteres de dibujo y pasan de 180
+# columnas siendo comentarios decorativos. Marcarlos llenaría el CI de ruido
+# cosmético el primer día y la reacción natural sería desactivar el linter entero.
+#
+# Este conjunto es un piso, no un techo: se puede endurecer (I para imports, B para
+# bugbear, UP para modernización) cuando la Ola 0 esté cerrada y el diff no compita
+# con el trabajo de los ítems.
+select = ["E4", "E7", "E9", "F"]
+
+[lint.per-file-ignores]
+# Los scripts validate_nb*.py replican deliberadamente la estructura del notebook
+# que validan, celda por celda: imports a media altura (E402) tras el bloque de
+# configuración, y nombres de variable de una letra en los bucles (E741). Alinearlos
+# con el estilo del resto rompería la correspondencia visual con el notebook, que es
+# justo lo que los hace revisables.
+"validate_nb*.py" = ["F401", "E402", "E741"]
+"scripts/*.py" = ["E402"]
+"backend/scripts/*.py" = ["E402"]

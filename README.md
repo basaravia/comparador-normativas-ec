@@ -3,11 +3,24 @@
 Pipeline de 5 fases para analizar el cumplimiento de manuales bancarios internos
 respecto a normativas ecuatorianas (SBS, BCE, SEPS, UAF, Asamblea Nacional).
 
-> **Estado:** Fase 1 del plan de mejoras, **olas 0, 1 y 2 cerradas**; de la Ola 3 ya
-> están fusionados el modelo de cobertura N:N (ítem 5) y el motor de doble vía (ítem 6).
-> Faltan la UI de la doble vía, el selector de alcance (ítem 7) y el flag de revisión
-> manual (ítem 10). El trabajo vive en `feature/comparador-v2`; `main` conserva el
-> baseline. Ver `PLAN_MEJORAS_ANEXO.md` para el alcance completo y qué queda por hacer.
+> **Estado (v6, rama `feature/v6-react-fastapi`):** el backend (FastAPI + pipeline) y los notebooks
+> no cambian de lógica; el frontend pasó de Streamlit/Vue a **React + Vite** con una **interfaz
+> mínima de prueba** (los 4 pasos, sin login, visor PDF ni inspector de chunks — se restauran luego).
+> La UI Streamlit y el front Vue ya no se versionan aquí (viven en otra rama). Lista para Databricks Apps,
+> pero **sin desplegar**: el deploy es manual (ver `docs/DEPLOY-DATABRICKS.md`).
+> Plan de mejoras y olas: `PLAN_MEJORAS_ANEXO.md`.
+
+## Estructura
+
+```
+backend/            FastAPI + pipeline (código Python: src/, api/, app/, tests/, templates/)
+frontend/           React + Vite + TypeScript + Tailwind (interfaz mínima de prueba)
+notebooks           00_pruebas, 01_markitdown, 02_rag_index, master, VALIDACION-FUNCIONAL (raíz)
+dependencies/       entorno conda de desarrollo
+docs/ scripts/      documentación de API · guardas de confidencialidad, empaquetado
+app.yaml            manifiesto de Databricks Apps (uvicorn)
+Normativa2026/ document_test/ output/ assets/   datos en la raíz (varios no viajan en git)
+```
 
 ---
 
@@ -15,21 +28,29 @@ respecto a normativas ecuatorianas (SBS, BCE, SEPS, UAF, Asamblea Nacional).
 
 ```bash
 git clone <repo> && cd comparador-normativas-ec
-git checkout feature/comparador-v2
+git checkout feature/v6-react-fastapi
 
 # 1 · Guardas de confidencialidad — ANTES de commitear nada
 mkdir -p .claude && cp scripts/guardas/denylist.example.json .claude/denylist.json
 #      …rellenar los patrones de identidad y de marca
 bash scripts/guardas/instalar_guardas.sh
 
-# 2 · Entorno
+# 2 · Entorno (los notebooks importan `src` desde backend/ vía instalación editable)
 conda env create -f dependencies/environment.yml
 conda activate normas_comparador
+pip install -e backend
 
 # 3 · Verificar
-pytest -q                          # 261 passed, 1 skipped
-streamlit run streamlit_app.py
+(cd backend && pytest -q)          # 501 passed, 3 skipped
+
+# 4 · Correr (dos terminales, desde la raíz)
+AUTH_ENABLED=false uvicorn api.main:app --app-dir backend --reload   # API en :8000
+(cd frontend && npm install && npm run dev)                          # UI en :5173, proxy a :8000
 ```
+
+La UI mínima no tiene login: con `AUTH_ENABLED=true` la API responde 401 y la UI muestra un aviso.
+Para servir el front desde FastAPI (como en producción): `cd frontend && npm run build` y abrir `:8000`.
+
 
 **Tres cosas no viajan en git, a propósito** (ver *Confidencialidad*):
 
@@ -48,7 +69,7 @@ credenciales redactadas.
 
 ## Interfaz Streamlit
 
-`streamlit_app.py` expone el mismo pipeline de `master.ipynb` como app web: carga
+`streamlit_app.py` (ya fuera de esta rama; hoy lo sustituye `frontend/`) exponía el mismo pipeline de `master.ipynb` como app web: carga
 de PDFs, configuración de modelos en la barra lateral, ejecución con progreso en
 vivo y dashboard de resultados.
 
@@ -68,7 +89,7 @@ Lo que cambió con la Ola 1 y se nota al usarla:
 
 Lo que se sumó en la Ola 2:
 
-- **La UI dejó de orquestar.** `streamlit_app.py` ya no construye sus propios backends
+- **La UI dejó de orquestar.** `streamlit_app.py` (ya fuera de esta rama) ya no construye sus propios backends
   ni pasa por alto `settings`; todo el flujo entre pestañas vive en `src/service.py`
   (S10), que Streamlit y, más adelante, una API HTTP pueden consumir por igual.
 - **Cada corrida tiene su carpeta.** `output/runs/<run_id>/` en vez de la ruta fija de
@@ -169,15 +190,17 @@ vías y no el producto. Diagrama completo en `architecture/ARCHITECTURE.md`.
 
 ---
 
-## Estructura del repositorio
+## Estructura del repositorio (detalle del backend)
+
+> **v6:** `src/`, `api/`, `app/`, `tests/` y `templates/` de este árbol viven ahora bajo `backend/`
+> (p. ej. `backend/src/service.py`). `streamlit_app.py` y `environment.yml` (freeze) ya no están en esta rama,
+> y `pyproject.toml` en `backend/` (la config de ruff, en `ruff.toml` de la raíz). Vista de conjunto arriba.
 
 ```text
 comparador-normativas-ec/
 ├── master.ipynb                  ← notebook principal (5 fases)
-├── streamlit_app.py              ← app web sobre el mismo pipeline
-├── pyproject.toml                ← pytest (pythonpath, marcadores) + ruff
+├── backend/pyproject.toml        ← pytest (pythonpath, marcadores); ruff en ruff.toml
 ├── PLAN_MEJORAS_ANEXO.md         ← plan de las tres fases y su estado
-├── environment.yml               ← freeze histórico — NO usar para replicar
 ├── dependencies/                 ← entorno real: environment.yml, requirements.txt
 ├── .github/workflows/ci.yml      ← lint + suite rápida (sin torch/docling)
 ├── Normativa2026/                ← PDFs de normativas ecuatorianas (públicas)
