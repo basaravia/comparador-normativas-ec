@@ -69,9 +69,9 @@ class Provider(str, Enum):
     VERTEX = "vertex"
 
     # Azure AI Foundry / Azure OpenAI con la forma clásica: endpoint del recurso + clave +
-    # api-version + nombre del DEPLOYMENT. Es `AzureChatOpenAI` / `AzureOpenAIEmbeddings`,
-    # no el `ChatOpenAI` del openai-compat, porque la api-version y el deployment viajan
-    # en la ruta y en la consulta. Variables: FOUNDRY_AI_* (ver .env.example).
+    # api-version + nombre del DEPLOYMENT. Usa `ChatOpenAI` / `OpenAIEmbeddings`, pero con la
+    # ruta por deployment, la api-version y la cabecera `api-key` que Azure exige (ver
+    # `_cliente_azure`), no el openai-compat pelado. Variables: FOUNDRY_AI_* (ver .env.example).
     AZURE = "azure"
 
     LOCAL_ST = "local_st"    # sentence-transformers en proceso
@@ -294,6 +294,26 @@ class ProviderSpec:
         return self
 
 
+def _cliente_azure(spec: ProviderSpec, deployment: str) -> dict[str, Any]:
+    """Argumentos con los que `ChatOpenAI` / `OpenAIEmbeddings` hablan con un deployment de Azure.
+
+    Foundry usa las clases de OpenAI (no las `Azure*`): lo que Azure añade se pone a mano y es lo
+    mismo que envían las `Azure*` por dentro —ruta por deployment, `api-version` en la consulta y
+    la clave en la cabecera `api-key`—. Se toma solo el host del endpoint: si alguien pega una
+    URL con ruta (`…/openai/v1/`), la ruta se descarta en vez de duplicarse.
+    """
+    from urllib.parse import urlparse
+
+    u = urlparse(spec.base_url or "")
+    host = f"{u.scheme}://{u.netloc}" if u.netloc else (spec.base_url or "").rstrip("/")
+    return {
+        "base_url": f"{host}/openai/deployments/{deployment}",
+        "api_key": spec.api_key,
+        "default_query": {"api-version": spec.extra["api_version"]},
+        "default_headers": {"api-key": spec.api_key},
+    }
+
+
 def _validar_azure(spec: ProviderSpec, *, deployment: str | None, var_deployment: str) -> None:
     """Comprueba la configuración ya resuelta de Azure y nombra CADA variable que falta.
 
@@ -369,14 +389,12 @@ def build_chat_model(spec: ProviderSpec) -> Any:
         )
 
     if spec.proveedor is Provider.AZURE:
-        from langchain_openai import AzureChatOpenAI
+        from langchain_openai import ChatOpenAI
 
         _validar_azure(spec, deployment=spec.modelo, var_deployment="FOUNDRY_AI_DEPLOYMENT")
-        return AzureChatOpenAI(
-            azure_endpoint=spec.base_url,
-            api_key=spec.api_key,
-            api_version=spec.extra["api_version"],
-            azure_deployment=spec.modelo,
+        return ChatOpenAI(
+            model=spec.modelo,
+            **_cliente_azure(spec, spec.modelo),
             # `None` omite el parámetro: los modelos de razonamiento solo aceptan la
             # temperatura de fábrica (FOUNDRY_OMIT_TEMPERATURE).
             temperature=None if spec.extra.get("sin_temperatura") else spec.temperature,
@@ -449,7 +467,7 @@ def build_embedding_backend(spec: ProviderSpec) -> Any:
         )
 
     if spec.proveedor is Provider.AZURE:
-        from langchain_openai import AzureOpenAIEmbeddings
+        from langchain_openai import OpenAIEmbeddings
 
         from .embeddings import LangChainEmbeddingsAdapter
 
@@ -457,12 +475,9 @@ def build_embedding_backend(spec: ProviderSpec) -> Any:
         # el deployment de CHAT, y mandarlo aquí apuntaría el índice a un modelo de texto.
         deployment = get("FOUNDRY_AI_EMBED_DEPLOYMENT", ui=original.modelo, default="")
         _validar_azure(spec, deployment=deployment, var_deployment="FOUNDRY_AI_EMBED_DEPLOYMENT")
-        embedder = AzureOpenAIEmbeddings(
-            azure_endpoint=spec.base_url,
-            api_key=spec.api_key,
-            api_version=spec.extra["api_version"],
-            azure_deployment=deployment,
+        embedder = OpenAIEmbeddings(
             model=deployment,
+            **_cliente_azure(spec, deployment),
             # Azure espera texto, no los arrays de tokens que tiktoken produce por defecto.
             check_embedding_ctx_length=False,
         )

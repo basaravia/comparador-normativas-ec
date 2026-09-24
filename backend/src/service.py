@@ -296,7 +296,7 @@ def construir_comparador(indice: NormativaIndex, config: ServiceConfig) -> Docum
     `llm_backend_kind` en {"openrouter", "groq", "local"} reutiliza el mismo `Provider.DMR`
     (openai-compat genérico) que ya usan los embeddings locales — ambos exponen la
     API de OpenAI, solo cambian `base_url`/`api_key`. "foundry" usa `Provider.AZURE`
-    (`AzureChatOpenAI`): la api-version y el deployment no caben en un openai-compat.
+    (`ChatOpenAI` con ruta por deployment, api-version y `api-key`): no es el openai-compat pelado.
 
     Con Groq, si además hay `OPENROUTER_API_KEY`/`OPENROUTER_LLM_MODEL` en el
     entorno, se arma un respaldo automático vía `.with_fallbacks()` de LangChain:
@@ -327,7 +327,7 @@ def construir_comparador(indice: NormativaIndex, config: ServiceConfig) -> Docum
             )
         elif config.llm_backend_kind == "foundry":
             # Azure AI Foundry por la vía clásica (endpoint + clave + api-version +
-            # deployment): `Provider.AZURE` → `AzureChatOpenAI`. Endpoint, clave, api-version
+            # deployment): `Provider.AZURE` → `ChatOpenAI`. Endpoint, clave, api-version
             # y deployment salen de FOUNDRY_AI_*; `llm_base_url`/`llm_api_key`/`llm_model`
             # de la UI o la API los sobrescriben. `build_chat_model` nombra lo que falte.
             spec = ProviderSpec(

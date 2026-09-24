@@ -40,7 +40,7 @@ def get_health() -> HealthResponse:
 def get_providers() -> ProvidersResponse:
     """Retorna los proveedores disponibles con aceleración GPU local y remota.
 
-    Azure AI Foundry va por `Provider.AZURE` (`AzureChatOpenAI` / `AzureOpenAIEmbeddings`).
+    Azure AI Foundry va por `Provider.AZURE` (`ChatOpenAI` / `OpenAIEmbeddings` con la ruta de Azure).
     Aquí solo se informa si sus variables FOUNDRY_AI_* están definidas: no se llama al
     recurso, así que "disponible" no garantiza que el endpoint responda.
     """

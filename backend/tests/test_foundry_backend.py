@@ -1,6 +1,6 @@
 """Backend `foundry` del LLM y los embeddings por variables de entorno.
 
-Foundry va por `Provider.AZURE` (`AzureChatOpenAI` / `AzureOpenAIEmbeddings`) con
+Foundry va por `Provider.AZURE` (`ChatOpenAI` / `OpenAIEmbeddings` con la ruta de Azure) con
 `FOUNDRY_AI_ENDPOINT`, `FOUNDRY_AI_TOKEN`, `FOUNDRY_AI_API_VERSION` y el deployment. Lo que
 estas pruebas fijan: que esos valores llegan a la petición (URL, api-version, clave), que
 el deployment de embeddings no se confunde con el de chat, que lo que falte se nombra, y
@@ -199,15 +199,15 @@ class TestServicioFoundry:
 
 
 class TestAzureChat:
-    """`AzureChatOpenAI` recibe lo que el usuario sustituye en el `.env`."""
+    """`ChatOpenAI` recibe lo que el usuario sustituye en el `.env`, con la forma de Azure."""
 
-    def test_construye_azure_con_los_cuatro_valores(self, foundry_env):
-        from langchain_openai import AzureChatOpenAI
+    def test_es_chatopenai_y_apunta_al_deployment(self, foundry_env):
+        from langchain_openai import AzureChatOpenAI, ChatOpenAI
         llm = build_chat_model(ProviderSpec(proveedor=Provider.AZURE, temperature=0.2))
-        assert isinstance(llm, AzureChatOpenAI)
-        assert llm.azure_endpoint == ENDPOINT_AZURE
-        assert llm.deployment_name == "chat-dep"
-        assert llm.openai_api_version == API_VERSION
+        assert isinstance(llm, ChatOpenAI) and not isinstance(llm, AzureChatOpenAI)
+        assert llm.model_name == "chat-dep"
+        assert str(llm.openai_api_base) == f"{ENDPOINT_AZURE}/openai/deployments/chat-dep"
+        assert llm.default_query == {"api-version": API_VERSION}
         assert llm.temperature == 0.2
 
     def test_sin_temperatura_la_omite(self, foundry_env):
@@ -237,24 +237,56 @@ class TestAzureChat:
         assert f"api-version={API_VERSION}" in capturado["url"]
         assert capturado["api_key"] == "clave-secreta"
 
+    @pytest.mark.parametrize("pegado", [
+        ENDPOINT_AZURE + "/",
+        ENDPOINT_AZURE + "/openai/v1/",
+        ENDPOINT_AZURE + "/openai/deployments/otro/chat/completions",
+    ])
+    def test_una_ruta_pegada_en_el_endpoint_se_descarta(self, monkeypatch, foundry_env, pegado):
+        monkeypatch.setenv("FOUNDRY_AI_ENDPOINT", pegado)
+        llm = build_chat_model(ProviderSpec(proveedor=Provider.AZURE))
+        assert str(llm.openai_api_base) == f"{ENDPOINT_AZURE}/openai/deployments/chat-dep"
+
 
 class TestAzureEmbeddings:
     def test_usa_el_deployment_de_embeddings_no_el_de_chat(self, foundry_env):
-        from langchain_openai import AzureOpenAIEmbeddings
+        from langchain_openai import OpenAIEmbeddings
         backend = build_embedding_backend(ProviderSpec(proveedor=Provider.AZURE))
-        assert isinstance(backend._embedder, AzureOpenAIEmbeddings)
-        assert backend._embedder.deployment == "emb-dep", "se usó el deployment de chat"
+        assert isinstance(backend._embedder, OpenAIEmbeddings)
+        assert backend._embedder.model == "emb-dep", "se usó el deployment de chat"
+        assert str(backend._embedder.openai_api_base) == f"{ENDPOINT_AZURE}/openai/deployments/emb-dep"
+        assert backend._embedder.default_query == {"api-version": API_VERSION}
         assert backend.nombre_modelo == "emb-dep"
-        assert backend._embedder.openai_api_version == API_VERSION
 
     def test_el_modelo_explicito_gana_al_entorno(self, foundry_env):
         backend = build_embedding_backend(ProviderSpec(proveedor=Provider.AZURE, modelo="de-la-ui"))
-        assert backend._embedder.deployment == "de-la-ui"
+        assert backend._embedder.model == "de-la-ui"
+        assert str(backend._embedder.openai_api_base).endswith("/deployments/de-la-ui")
 
     def test_sin_deployment_de_embeddings_nombra_la_variable(self, monkeypatch, foundry_env):
         monkeypatch.delenv("FOUNDRY_AI_EMBED_DEPLOYMENT")
         with pytest.raises(ProviderConfigError, match="FOUNDRY_AI_EMBED_DEPLOYMENT"):
             build_embedding_backend(ProviderSpec(proveedor=Provider.AZURE))
+
+    def test_la_peticion_lleva_deployment_api_version_y_clave(self, foundry_env):
+        import httpx
+        capturado: dict = {}
+
+        def _responder(request: httpx.Request) -> httpx.Response:
+            capturado["url"] = str(request.url)
+            capturado["api_key"] = request.headers.get("api-key")
+            return httpx.Response(200, json={
+                "object": "list", "model": "emb-dep",
+                "usage": {"prompt_tokens": 1, "total_tokens": 1},
+                "data": [{"object": "embedding", "index": 0, "embedding": [0.1, 0.2]}],
+            })
+
+        backend = build_embedding_backend(ProviderSpec(proveedor=Provider.AZURE))
+        backend._embedder.client._client._client = httpx.Client(transport=httpx.MockTransport(_responder))
+        backend._embedder.embed_query("hola")
+        assert capturado["url"].startswith(f"{ENDPOINT_AZURE}/openai/deployments/emb-dep/embeddings")
+        assert f"api-version={API_VERSION}" in capturado["url"]
+        assert capturado["api_key"] == "clave-secreta"
 
     def test_el_servicio_lo_elige_con_embed_backend_foundry(self, monkeypatch):
         vistos: list[ProviderSpec] = []
