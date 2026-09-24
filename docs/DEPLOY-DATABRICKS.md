@@ -22,7 +22,7 @@ En Databricks: *Create app* → fuente **Git** → repo `comparador-normativas-e
 | Requisito | Cómo se cumple |
 |---|---|
 | Instala `requirements.txt` con pip **desde la raíz**, Python 3.11 | `requirements.txt` en la raíz, versiones fijadas desde un entorno 3.11 donde el E2E pasó |
-| El puerto lo asigna la plataforma (`DATABRICKS_APP_PORT`) y el `command` **no pasa por shell** | `app.yaml` usa `--port DATABRICKS_APP_PORT` (sin `$`): Databricks lo sustituye literalmente |
+| El puerto lo asigna la plataforma y el `command` **no pasa por shell** (nada se sustituye en él) | `app.yaml` no pasa `--host`/`--port`: uvicorn lee `UVICORN_HOST`/`UVICORN_PORT`, que Databricks define. Un `--port DATABRICKS_APP_PORT` llegó literal y tumbó la app |
 | Por defecto 2 vCPU y **6 GB** de memoria | Pico medido en el E2E: **4,2 GB** (Docling + reranker + FAISS). Cabe, con poco margen |
 | El front no se compila en la app si no hay `package.json` | `frontend/dist` ya compilado en la rama |
 | Solo existe lo que está en la rama | Van los PDF **versionados** (normativas públicas + manuales MOCK) y la caché de Docling: sin ellos la app lista 0 documentos y la UI mínima no puede subirlos |
@@ -30,7 +30,8 @@ En Databricks: *Create app* → fuente **Git** → repo `comparador-normativas-e
 ### Prueba end-to-end hecha antes de publicar
 
 Sobre el mismo contenido de la rama, en un entorno limpio de Python 3.11 con `pip install -r
-requirements.txt`, arrancando con el `command` de `app.yaml` y `DATABRICKS_APP_PORT` sustituido:
+requirements.txt`, arrancando con el `command` de `app.yaml` tal cual (sin sustituir nada) y las
+variables que Databricks define (`UVICORN_HOST`, `UVICORN_PORT`, `DATABRICKS_APP_PORT`…):
 SPA → listar documentos → tabular (Docling) → índice FAISS → búsqueda + reranker → comparación
 doble vía → Excel del papel de trabajo. Todo OK. El LLM fue Groq (perfil `local_groq`); Foundry
 no se pudo probar sin credenciales. Detalle: la corrida de muestra (2 secciones de MOCK-DEMO-01
