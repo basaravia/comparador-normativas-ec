@@ -365,3 +365,24 @@ class TestLaApiRespetaLLMBackend:
         from api.routers.compare import _service_config_from_request
         from api.schemas import StartCompareRequest
         assert _service_config_from_request(StartCompareRequest()).llm_backend_kind == "vertex"
+
+
+class TestPlaceholdersDeAppYaml:
+    """Un `REEMPLAZAR-…` sin sustituir no es un valor: se nombra como falta, no como fallo de red."""
+
+    def test_placeholder_cuenta_como_falta(self, monkeypatch, foundry_env):
+        monkeypatch.setenv("FOUNDRY_AI_ENDPOINT", "REEMPLAZAR-https://<recurso>.openai.azure.com")
+        monkeypatch.setenv("FOUNDRY_AI_API_VERSION", "REEMPLAZAR-2024-10-21")
+        with pytest.raises(ProviderConfigError) as e:
+            build_chat_model(ProviderSpec(proveedor=Provider.AZURE))
+        assert e.value.faltantes == ["FOUNDRY_AI_ENDPOINT", "FOUNDRY_AI_API_VERSION"]
+        assert "REEMPLAZAR" in str(e.value)
+
+    def test_la_api_lo_informa(self, monkeypatch, foundry_env):
+        from fastapi.testclient import TestClient
+
+        from api.main import app
+        monkeypatch.setenv("FOUNDRY_AI_DEPLOYMENT", "REEMPLAZAR-deployment-del-llm")
+        f = [p for p in TestClient(app).get("/api/config/providers").json()["providers"]
+             if p["id"] == "foundry"][0]
+        assert f["disponible"] is False and "FOUNDRY_AI_DEPLOYMENT" in f["detalles"]

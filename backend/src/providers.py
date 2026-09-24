@@ -314,23 +314,29 @@ def _cliente_azure(spec: ProviderSpec, deployment: str) -> dict[str, Any]:
     }
 
 
+def _sin_valor(valor: object) -> bool:
+    """Vacío o todavía con el placeholder de app.yaml (`REEMPLAZAR-…`): cuenta como no definido."""
+    return not valor or str(valor).strip().upper().startswith("REEMPLAZAR")
+
+
 def _validar_azure(spec: ProviderSpec, *, deployment: str | None, var_deployment: str) -> None:
     """Comprueba la configuración ya resuelta de Azure y nombra CADA variable que falta.
 
     `deployment` viene aparte porque chat y embeddings usan deployments distintos.
     """
     pendientes = []
-    if not spec.base_url:
+    if _sin_valor(spec.base_url):
         pendientes.append("FOUNDRY_AI_ENDPOINT")
-    if not spec.api_key:
+    if _sin_valor(spec.api_key):
         pendientes.append("FOUNDRY_AI_TOKEN")
-    if not spec.extra.get("api_version"):
+    if _sin_valor(spec.extra.get("api_version")):
         pendientes.append("FOUNDRY_AI_API_VERSION")
-    if not deployment:
+    if _sin_valor(deployment):
         pendientes.append(var_deployment)
     if pendientes:
         raise ProviderConfigError(
-            f"Faltan variables para el proveedor 'azure' (Foundry): {', '.join(pendientes)}",
+            f"Faltan variables para el proveedor 'azure' (Foundry), vacías o con el valor "
+            f"REEMPLAZAR-* de app.yaml: {', '.join(pendientes)}",
             faltantes=pendientes,
         )
 
