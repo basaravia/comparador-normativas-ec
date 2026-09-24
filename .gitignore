@@ -87,7 +87,7 @@ output/eval/
 
 # Node / Frontend dependencies
 frontend/node_modules/
-frontend/dist/
+# frontend/dist SÍ se versiona: Databricks despliega desde Git y la app no compila el front.
 frontend/*.tsbuildinfo
 *.egg-info/
 dist-app/

@@ -12,7 +12,8 @@ rm -rf "$OUT" && mkdir -p "$OUT/frontend" "$OUT/assets/brand"
 
 # Databricks Apps instala `requirements.txt` desde la raíz de la app.
 cp app.yaml "$OUT/app.yaml"
-cp backend/requirements.txt "$OUT/requirements.txt"
+# requirements.txt de la RAÍZ (mínimo para arrancar). El completo con docling/torch es backend/requirements.txt.
+cp requirements.txt "$OUT/requirements.txt"
 
 # El backend conserva su árbol: las rutas del código cuentan con backend/ bajo la raíz.
 rsync -a --exclude '__pycache__' --exclude 'tests' --exclude '*.egg-info' backend/ "$OUT/backend/"

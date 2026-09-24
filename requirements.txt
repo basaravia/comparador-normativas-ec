@@ -1,0 +1,27 @@
+# Dependencias para desplegar desde Git en Databricks Apps (lo instala desde la RAÍZ del repo).
+#
+# Lo MÍNIMO para arrancar la API y usar el LLM/embeddings de Foundry. Es la misma lista que
+# la suite rápida del CI, así que está probada: arranca sin torch ni docling.
+#
+# NO incluye docling, torch ni sentence-transformers (varios GB): sin ellos la API arranca,
+# pero tabular PDFs (Paso 1) y el reranker local fallan al usarse. Para el pipeline completo,
+# usa backend/requirements.txt (ver docs/DEPLOY-DATABRICKS.md).
+fastapi>=0.115.0
+uvicorn>=0.30.0
+python-multipart>=0.0.10
+pydantic>=2.10.0
+httpx>=0.27.0
+pandas>=2.0.0
+numpy>=1.26.0
+tqdm>=4.66.0
+openpyxl>=3.1.0
+pyyaml>=6.0
+python-dotenv>=1.0.0
+pypdfium2>=4.30.0
+faiss-cpu>=1.8.0
+langchain>=0.3.0
+langchain-core>=0.3.0
+langchain-openai>=0.3.0
+# app/logging_utils.py hace `import streamlit` a nivel de módulo (deuda anotada).
+streamlit>=1.38.0
+altair>=5.0.0
