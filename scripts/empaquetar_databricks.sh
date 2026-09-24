@@ -21,7 +21,13 @@ cp -r frontend/dist "$OUT/frontend/dist"
 # Solo el placeholder de marca; la identidad real (assets/brand/brand.json) no viaja en git.
 cp -r assets/brand/_placeholder "$OUT/assets/brand/_placeholder"
 
+# Documentos de prueba: SOLO los versionados en git (normativas públicas, manuales MOCK y la caché
+# de Docling de las normativas). `git ls-files` evita copiar manuales reales que existan en disco
+# sin versionar. Sin ellos la app desplegada lista 0 documentos y la UI mínima no puede subirlos.
+git ls-files -z Normativa2026 'document_test/*.pdf' output/docling/'*.md' \
+  | xargs -0 -I{} install -D -m 0644 {} "$OUT/{}"
+
 echo "✔ $OUT listo ($(du -sh "$OUT" | cut -f1)). Contenido:"
 (cd "$OUT" && find . -maxdepth 2 -not -path './backend/*/*' | sort | head -30)
 echo
-echo "Ojo: no incluye el archivo de entorno ni las normativas/manuales reales (los PDF mock de document_test/ sí están en git; el resto no). Ver docs/DEPLOY-DATABRICKS.md"
+echo "Incluye solo los PDF versionados (normativas públicas y manuales MOCK); nunca el archivo de entorno ni manuales reales. Ver docs/DEPLOY-DATABRICKS.md"

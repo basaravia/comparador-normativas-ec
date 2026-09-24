@@ -17,12 +17,52 @@ git push origin deploy/databricks
 En Databricks: *Create app* → fuente **Git** → repo `comparador-normativas-ec`, rama
 `deploy/databricks`. Cada vez que cambies la app, regenera la rama, haz push y pulsa *Deploy*.
 
-### Por qué esa forma (lo que hizo caer el primer intento)
+### Lo que exige Databricks Apps (documentación oficial) y cómo lo cumple la rama
 
-Databricks instala **`requirements.txt` desde la raíz** de lo que despliega y sirve el front ya
-compilado. Desplegando la rama de trabajo, la raíz no tenía `requirements.txt` (vive en
-`backend/`) ni el front compilado: «Packages installed» no instalaba nada útil y la app caía
-al arrancar por módulos que no existían. La rama `deploy/databricks` lo trae todo en su raíz.
+| Requisito | Cómo se cumple |
+|---|---|
+| Instala `requirements.txt` con pip **desde la raíz**, Python 3.11 | `requirements.txt` en la raíz, versiones fijadas desde un entorno 3.11 donde el E2E pasó |
+| El puerto lo asigna la plataforma (`DATABRICKS_APP_PORT`) y el `command` **no pasa por shell** | `app.yaml` usa `--port DATABRICKS_APP_PORT` (sin `$`): Databricks lo sustituye literalmente |
+| Por defecto 2 vCPU y **6 GB** de memoria | Pico medido en el E2E: **4,2 GB** (Docling + reranker + FAISS). Cabe, con poco margen |
+| El front no se compila en la app si no hay `package.json` | `frontend/dist` ya compilado en la rama |
+| Solo existe lo que está en la rama | Van los PDF **versionados** (normativas públicas + manuales MOCK) y la caché de Docling: sin ellos la app lista 0 documentos y la UI mínima no puede subirlos |
+
+### Prueba end-to-end hecha antes de publicar
+
+Sobre el mismo contenido de la rama, en un entorno limpio de Python 3.11 con `pip install -r
+requirements.txt`, arrancando con el `command` de `app.yaml` y `DATABRICKS_APP_PORT` sustituido:
+SPA → listar documentos → tabular (Docling) → índice FAISS → búsqueda + reranker → comparación
+doble vía → Excel del papel de trabajo. Todo OK. El LLM fue Groq (perfil `local_groq`); Foundry
+no se pudo probar sin credenciales. Detalle: la corrida de muestra (2 secciones de MOCK-DEMO-01
+contra el cap. V) dio cobertura 0 %: el flujo funciona, el resultado de negocio no se evaluó.
+
+### Red: el punto que más probablemente rompe la instalación en la Free Edition
+
+La Free Edition limita la salida a internet a una lista de dominios que no está publicada. La app
+necesita salir a:
+
+- `pypi.org` / `files.pythonhosted.org` — instalar dependencias (según la comunidad, permitido).
+- `download.pytorch.org` — torch CPU (`--extra-index-url` en `requirements.txt`). **Sin confirmar.**
+- `huggingface.co` — Docling y el reranker descargan sus modelos **al primer uso** (~1,5 GB).
+  **Sin confirmar.**
+- `<recurso>.openai.azure.com` — Foundry. **Sin confirmar.**
+
+Si la instalación o el primer uso fallan por red (`Temporary failure in name resolution`,
+`Connection refused`, timeouts), la Free Edition desbloquea la salida a internet al **verificar
+la identidad** (botón *Verify identity* del encabezado del workspace). En un workspace de pago se
+configura en *networking* / *egress*.
+
+Si `download.pytorch.org` estuviera bloqueado, quitar la línea `--extra-index-url` y el sufijo
+`+cpu` de `torch`/`torchvision`: pip bajará el torch de PyPI, que funciona pero arrastra ~3 GB de
+CUDA (instalación mucho más lenta y pesada).
+
+### Regenerar las versiones fijadas
+
+```bash
+conda create -n dbx311 python=3.11 -y && conda activate dbx311
+pip install --extra-index-url https://download.pytorch.org/whl/cpu -r backend/requirements.txt
+# y copiar el `pip freeze` bajo la cabecera de requirements.txt (ver cómo está hecho hoy)
+```
 
 ## Antes de desplegar
 
@@ -36,30 +76,20 @@ al arrancar por módulos que no existían. La rama `deploy/databricks` lo trae t
 - **`AUTH_ENABLED`** está en `"false"` porque la interfaz mínima no tiene login. Databricks Apps
   ya pone su acceso por workspace delante, pero confírmalo antes de exponerla. Cuando vuelva el
   login: `"true"` + secreto `AUTH_SECRET_KEY`.
-- Los documentos (normativas y manuales) hay que subirlos aparte; no viajan en la rama.
-
-## Qué incluye y qué no el `requirements.txt` de la raíz
-
-Es lo **mínimo para arrancar** la API y usar el LLM y los embeddings de Foundry (la misma lista
-que la suite rápida del CI). **No incluye `docling`, `torch` ni `sentence-transformers`** (varios
-GB): la app arranca y responde, pero **tabular PDFs (Paso 1) y el reranker local fallan al
-usarse**. Para el pipeline completo hay que instalar `backend/requirements.txt` (copiarlo sobre el
-de la raíz en la rama de deploy). Ojo con el tamaño y el tiempo de instalación, y con los límites
-del plan de Databricks (la *Free Edition* tiene poca memoria).
+- Documentos: la rama trae los PDF de prueba versionados. Los manuales reales NO: se suben
+  aparte (la API tiene `POST /api/documents/upload`; la UI mínima aún no).
 
 ## Si la app sigue cayendo: dónde mirar
 
-Pestaña **Logs** de la app: ahí está el traceback del arranque. Las causas típicas son un módulo
-que falta (`ModuleNotFoundError`), un puerto distinto de 8000, o un `valueFrom` cuyo secreto no
-está asociado en *App resources*. Además, la *Free Edition* puede restringir la salida a internet:
-si bloquea `*.openai.azure.com`, la app arranca pero Foundry no responde (a verificar en tu
-instancia).
+Pestaña **Logs** de la app: ahí está el traceback del arranque. Las causas típicas son la red (sección anterior), un
+`valueFrom` cuyo secreto no está asociado en *App resources*, o memoria insuficiente
+(`Killed` / OOM) si el cómputo de la app es menor que los 6 GB por defecto.
 
 ## Alternativa: subir la carpeta a mano
 
 `bash scripts/empaquetar_databricks.sh` deja lo mismo en `dist-app/` (ignorado por git) para
-sincronizarlo al workspace sin pasar por Git. No incluye `.env`, `Normativa2026/`, los manuales
-reales de `document_test/` (solo los mock están en git) ni `assets/brand/brand.json`.
+sincronizarlo al workspace sin pasar por Git. Incluye solo los PDF versionados; nunca `.env`, los
+manuales reales de `document_test/` ni `assets/brand/brand.json`.
 
 ## Deuda conocida
 
