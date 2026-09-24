@@ -2,18 +2,14 @@
 # https://docs.databricks.com/en/dev-tools/databricks-apps/app-configuration.html
 # Backend FastAPI (sirve también el frontend React compilado desde frontend/dist).
 # Se lanza desde la raíz del paquete; el código vive en backend/ (--app-dir).
-# El puerto lo asigna Databricks: `DATABRICKS_APP_PORT` se sustituye literalmente en el comando
-# (no hay shell, así que NO se escribe `$DATABRICKS_APP_PORT`). Fijar 8000 a mano rompe la app
-# si la plataforma asigna otro puerto.
+# Sin --host ni --port: Databricks define UVICORN_HOST y UVICORN_PORT en el entorno de la app y
+# uvicorn los lee solo. El comando se ejecuta SIN shell y nada sustituye texto dentro de él: pasar
+# `--port DATABRICKS_APP_PORT` llega literal y uvicorn se cae (visto en el despliegue real).
 command:
   - "uvicorn"
   - "api.main:app"
   - "--app-dir"
   - "backend"
-  - "--host"
-  - "0.0.0.0"
-  - "--port"
-  - "DATABRICKS_APP_PORT"
 
 env:
   # app/logging_utils.py importa streamlit; sin esto imprime avisos de telemetría.
