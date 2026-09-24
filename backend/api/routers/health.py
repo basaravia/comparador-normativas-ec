@@ -11,6 +11,7 @@ from src import config as cfg
 from src.errors import ProviderConfigError
 from src.model_registry import modelos_disponibles
 from src.perfiles import perfil_activo
+from src.providers import _sin_valor
 from src.providers import Provider, ProviderSpec, resolve_device
 from src.service import ServiceConfig
 from src.settings import get as get_setting
@@ -66,7 +67,7 @@ def get_providers() -> ProvidersResponse:
     # Con estas cuatro variables `build_chat_model` puede construir el cliente de Azure.
     foundry_faltan = [v for v in ("FOUNDRY_AI_ENDPOINT", "FOUNDRY_AI_TOKEN",
                                   "FOUNDRY_AI_API_VERSION", "FOUNDRY_AI_DEPLOYMENT")
-                      if not get_setting(v, default="")]
+                      if _sin_valor(get_setting(v, default=""))]
 
     providers = [
         ProviderInfo(
