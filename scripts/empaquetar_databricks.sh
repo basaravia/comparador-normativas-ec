@@ -12,6 +12,8 @@ rm -rf "$OUT" && mkdir -p "$OUT/frontend" "$OUT/assets/brand"
 
 # Databricks Apps instala `requirements.txt` desde la raíz de la app.
 cp app.yaml "$OUT/app.yaml"
+# Plantilla de variables (sin valores): referencia para quien configure la app o un .env.
+cp .env.example "$OUT/.env.example"
 # requirements.txt de la RAÍZ (mínimo para arrancar). El completo con docling/torch es backend/requirements.txt.
 cp requirements.txt "$OUT/requirements.txt"
 
