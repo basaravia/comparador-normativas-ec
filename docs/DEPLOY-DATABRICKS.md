@@ -67,11 +67,19 @@ pip install --extra-index-url https://download.pytorch.org/whl/cpu -r backend/re
 
 ## Antes de desplegar
 
-- **`app.yaml`**: sustituir los `REEMPLAZAR-*` de Foundry (`FOUNDRY_AI_ENDPOINT`,
-  `FOUNDRY_AI_API_VERSION`, `FOUNDRY_AI_DEPLOYMENT`, `FOUNDRY_AI_EMBED_DEPLOYMENT`). La clave va
-  como secreto: crear `foundry_ai_token` y asociarlo en *App resources* con ese mismo nombre. Es el
-  **único** secreto que pide el `app.yaml`; Vertex, Groq, OpenRouter y el login están comentados
-  porque cada `valueFrom` exige que su secreto exista.
+- **Configuración, como recomienda Databricks:** todo en `app.yaml`. Los parámetros no
+  sensibles como `value` y los secretos como **recurso de la app + `valueFrom`**; nunca el valor
+  en el archivo. El `.env` es solo para desarrollo local. Pasos:
+  1. Crear dos secretos en un scope: `foundry_ai_token` (la clave) y `foundry_ai_endpoint`
+     (la URL; va como secreto porque nombra tu recurso de Azure y el repo es público).
+  2. En la app: *App resources* → *Add resource* → **Secret** para cada uno, con esos mismos
+     *resource names*, permiso de lectura.
+  3. En `app.yaml`, sustituir los `REEMPLAZAR-*` de `FOUNDRY_AI_API_VERSION`,
+     `FOUNDRY_AI_DEPLOYMENT` y `FOUNDRY_AI_EMBED_DEPLOYMENT`.
+
+  Leer secretos con `dbutils`/`databricks-sdk` (`DATABRICKS_SECRET_SCOPE_<NOMBRE>` /
+  `DATABRICKS_SECRET_KEY_<NOMBRE>`) sigue soportado para notebooks, jobs u otros entornos, pero en
+  una App Databricks documenta solo `valueFrom`.
 - **`MODEL_PROFILE`** (en `app.yaml`) elige el backend: `foundry` ahí. Los perfiles están en
   `backend/config/perfiles.yaml`.
 - **`AUTH_ENABLED`** está en `"false"` porque la interfaz mínima no tiene login. Databricks Apps
