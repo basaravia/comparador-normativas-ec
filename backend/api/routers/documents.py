@@ -11,7 +11,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 
 from api.schemas import DocumentItem, DocumentsListResponse, TabulateRequest, TabulateResponse
-from src import service
+from src import service, volumen
 
 router = APIRouter(prefix="/api/documents", tags=["Documentos"])
 
@@ -20,6 +20,13 @@ NORMATIVA_DIR = REPO_ROOT / "Normativa2026"
 MANUAL_DIR = REPO_ROOT / "document_test"
 UPLOAD_NORMATIVA_DIR = REPO_ROOT / "output" / "uploads" / "normativas"
 UPLOAD_MANUAL_DIR = REPO_ROOT / "output" / "uploads" / "manuales"
+
+
+def _directorios(tipo: str) -> list[Path]:
+    """Dónde buscar PDF: los del paquete, los subidos y las copias del volumen de Unity Catalog."""
+    if tipo == "normativa":
+        return [NORMATIVA_DIR, UPLOAD_NORMATIVA_DIR, volumen.directorio_local("normativa")]
+    return [MANUAL_DIR, UPLOAD_MANUAL_DIR, volumen.directorio_local("manual")]
 
 # Almacén en memoria de DataFrames tabulados
 _CACHE: dict[str, Any] = {
@@ -37,7 +44,7 @@ def _buscar_pdf(tipo: str, doc_id: str) -> Optional[Path]:
     safe_name = Path(doc_id).name
     if not safe_name or safe_name in (".", "..") or "/" in doc_id or "\\" in doc_id:
         return None
-    directorios = [NORMATIVA_DIR, UPLOAD_NORMATIVA_DIR] if tipo == "normativa" else [MANUAL_DIR, UPLOAD_MANUAL_DIR]
+    directorios = _directorios(tipo)
     nombre = safe_name if safe_name.endswith(".pdf") else f"{safe_name}.pdf"
     for d in directorios:
         try:
@@ -51,37 +58,23 @@ def _buscar_pdf(tipo: str, doc_id: str) -> Optional[Path]:
 
 @router.get("", response_model=DocumentsListResponse)
 def list_documents() -> DocumentsListResponse:
-    """Lista todos los PDFs disponibles en las carpetas base y de subidas."""
-    normativas: list[DocumentItem] = []
-    manuales: list[DocumentItem] = []
-
-    for d in [NORMATIVA_DIR, UPLOAD_NORMATIVA_DIR]:
-        if d.exists():
+    """Lista los PDF del paquete, los subidos y los del volumen de Unity Catalog (si hay)."""
+    volumen.sincronizar()
+    vistos: dict[str, list[DocumentItem]] = {"normativa": [], "manual": []}
+    for tipo, items in vistos.items():
+        nombres: set[str] = set()
+        for d in _directorios(tipo):
+            if not d.exists():
+                continue
             for f in sorted(d.glob("*.pdf")):
-                normativas.append(
-                    DocumentItem(
-                        id=f.name,
-                        nombre=f.stem,
-                        tipo="normativa",
-                        size_bytes=f.stat().st_size,
-                        tiene_pdf=True,
-                    )
-                )
+                if f.name in nombres:   # el mismo PDF en dos sitios se lista una vez
+                    continue
+                nombres.add(f.name)
+                items.append(DocumentItem(id=f.name, nombre=f.stem, tipo=tipo,
+                                          size_bytes=f.stat().st_size, tiene_pdf=True))
 
-    for d in [MANUAL_DIR, UPLOAD_MANUAL_DIR]:
-        if d.exists():
-            for f in sorted(d.glob("*.pdf")):
-                manuales.append(
-                    DocumentItem(
-                        id=f.name,
-                        nombre=f.stem,
-                        tipo="manual",
-                        size_bytes=f.stat().st_size,
-                        tiene_pdf=True,
-                    )
-                )
-
-    return DocumentsListResponse(normativas=normativas, manuales=manuales)
+    return DocumentsListResponse(normativas=vistos["normativa"], manuales=vistos["manual"],
+                                 aviso_volumen=volumen.ultimo_error())
 
 
 @router.get("/{tipo}/{doc_id}/pdf")

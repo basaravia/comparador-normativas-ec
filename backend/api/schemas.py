@@ -51,6 +51,8 @@ class DocumentItem(BaseModel):
 class DocumentsListResponse(BaseModel):
     normativas: List[DocumentItem]
     manuales: List[DocumentItem]
+    # Si hay un volumen de Unity Catalog configurado y no se pudo leer, el motivo.
+    aviso_volumen: Optional[str] = None
 
 
 class TabulateRequest(BaseModel):

@@ -40,6 +40,14 @@ env:
   - name: "FOUNDRY_AI_EMBED_DEPLOYMENT"
     value: "REEMPLAZAR-deployment-de-embeddings"
 
+  # ── Documentos desde un volumen de Unity Catalog (backend/src/volumen.py) ─────
+  # Los PDF grandes o reales no viajan en la app (límite de 10 MB): van en un volumen con
+  # subcarpetas normativas/ y manuales/. En la app: App resources → Add resource → UC volume,
+  # permiso "Can read", clave de recurso "documentos". Sin el recurso, la app usa solo los PDF
+  # pequeños del paquete.
+  - name: "DOCUMENTOS_VOLUMEN"
+    valueFrom: "documentos"
+
   # ── Alternativas (comentadas): cada `valueFrom` exige que exista ese secreto en la App ──
   # Para usar Vertex/Groq/OpenRouter, descomentar y elegir el MODEL_PROFILE que corresponda.
   # ── Vertex AI (LLM de grading + embeddings, Provider.VERTEX) ────────────────

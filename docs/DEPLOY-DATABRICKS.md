@@ -89,6 +89,21 @@ pip install --extra-index-url https://download.pytorch.org/whl/cpu -r backend/re
 - Documentos: la rama trae los PDF de prueba versionados. Los manuales reales NO: se suben
   aparte (la API tiene `POST /api/documents/upload`; la UI mínima aún no).
 
+## Documentos desde un volumen de Unity Catalog (esta rama)
+
+Esta rama (`feature/v6-uc-volumen`, despliegue en `deploy/databricks-volumen`) añade la lectura de
+PDF desde un volumen, para documentos grandes o reales que no caben en la app. La rama principal
+(`deploy/databricks`) no lo lleva: el tenant productivo no permite crear volúmenes.
+
+1. Crear un volumen y subir los PDF a `normativas/` y `manuales/` dentro de él.
+2. En la app: *App resources* → *Add resource* → **UC volume** → ese volumen, permiso
+   **Can read**, clave de recurso **`documentos`** (= el `valueFrom` de `DOCUMENTOS_VOLUMEN`).
+3. Desplegar desde `deploy/databricks-volumen` (se genera con `bash scripts/rama_deploy.sh`).
+
+La app descarga los PDF nuevos o cambiados a `output/volumen/` con `databricks-sdk` (como mucho
+una vez por minuto) y los lista junto a los del paquete. Si el volumen falla (sin permiso, ruta
+mala), la app sigue funcionando y `GET /api/documents` devuelve el motivo en `aviso_volumen`.
+
 ## Si la app sigue cayendo: dónde mirar
 
 Pestaña **Logs** de la app: ahí está el traceback del arranque. Las causas típicas son la red (sección anterior), un

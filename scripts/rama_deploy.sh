@@ -7,7 +7,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-RAMA=deploy/databricks
+# Rama destino: argumento opcional. Cada rama de trabajo tiene la suya, para no pisar otra.
+RAMA="${1:-deploy/databricks-volumen}"
 bash scripts/empaquetar_databricks.sh >/dev/null
 ORIGEN=$(git rev-parse --short HEAD)
 
