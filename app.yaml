@@ -1,0 +1,95 @@
+# Databricks Apps configuration manifest
+# https://docs.databricks.com/en/dev-tools/databricks-apps/app-configuration.html
+# Backend FastAPI (sirve también el frontend React compilado desde frontend/dist).
+# Se lanza desde la raíz del paquete; el código vive en backend/ (--app-dir).
+# Sin --host ni --port: Databricks define UVICORN_HOST y UVICORN_PORT en el entorno de la app y
+# uvicorn los lee solo. El comando se ejecuta SIN shell y nada sustituye texto dentro de él: pasar
+# `--port DATABRICKS_APP_PORT` llega literal y uvicorn se cae (visto en el despliegue real).
+command:
+  - "uvicorn"
+  - "api.main:app"
+  - "--app-dir"
+  - "backend"
+
+env:
+  # app/logging_utils.py importa streamlit; sin esto imprime avisos de telemetría.
+  - name: "STREAMLIT_GATHER_USAGE_STATS"
+    value: "false"
+  - name: "PYTHONUNBUFFERED"
+    value: "1"
+
+  # ── Azure AI Foundry (LLM + embeddings) — backend activo ─────────────────────
+  # Patrón recomendado por Databricks: parámetros no sensibles con `value`, secretos como
+  # recurso de la app con `valueFrom` (nunca el valor en este archivo, que es público).
+  # Único secreto: el token. Se asocia en la app: App resources → Add resource → Secret
+  # (tu scope y key), permiso "Can read", clave de recurso "foundry_ai_token" (= el valueFrom).
+  #
+  # Perfil de modelos (backend/config/perfiles.yaml): foundry | default | local | local_groq |
+  # personalizado. Para forzar un solo eje: LLM_BACKEND / EMBED_BACKEND.
+  - name: "MODEL_PROFILE"
+    value: "foundry"
+  - name: "FOUNDRY_AI_TOKEN"
+    valueFrom: "foundry_ai_token"
+  # No sensibles: sustituir los REEMPLAZAR-* por el endpoint, la api-version y los deployments.
+  - name: "FOUNDRY_AI_ENDPOINT"
+    value: "REEMPLAZAR-https://<recurso>.openai.azure.com"
+  - name: "FOUNDRY_AI_API_VERSION"
+    value: "REEMPLAZAR-2024-10-21"
+  - name: "FOUNDRY_AI_DEPLOYMENT"
+    value: "REEMPLAZAR-deployment-del-llm"
+  - name: "FOUNDRY_AI_EMBED_DEPLOYMENT"
+    value: "REEMPLAZAR-deployment-de-embeddings"
+
+  # ── Documentos desde un volumen de Unity Catalog (backend/src/volumen.py) ─────
+  # Los PDF grandes o reales no viajan en la app (límite de 10 MB): van en un volumen con
+  # subcarpetas normativas/ y manuales/. En la app: App resources → Add resource → UC volume,
+  # permiso "Can read", clave de recurso "documentos". Sin el recurso, la app usa solo los PDF
+  # pequeños del paquete.
+  - name: "DOCUMENTOS_VOLUMEN"
+    valueFrom: "documentos"
+
+  # ── Alternativas (comentadas): cada `valueFrom` exige que exista ese secreto en la App ──
+  # Para usar Vertex/Groq/OpenRouter, descomentar y elegir el MODEL_PROFILE que corresponda.
+  # ── Vertex AI (LLM de grading + embeddings, Provider.VERTEX) ────────────────
+  # VERTEX_PROJECT_ID / VERTEX_LOCATION no son secretos: reemplazar el placeholder.
+  # - name: "VERTEX_PROJECT_ID"
+  #   value: "REEMPLAZAR-project-id"
+  # - name: "VERTEX_LOCATION"
+  #   value: "global"
+  # La cuenta de servicio SÍ es secreta. Databricks Apps inyecta secretos como
+  # contenido de variable, no como archivo montado — por eso el JSON completo
+  # (no una ruta) y src/bootstrap.py lo materializa a archivo en el arranque
+  # antes de que google-auth/ADC lo necesite. Requiere, antes de este deploy:
+  #   1. databricks secrets create-scope <scope>
+  #   2. databricks secrets put-secret <scope> gcp_credentials_json --string-value "$(cat clave.json)"
+  #   3. En la UI de la App → App resources → Add resource → Secret → ese scope/key,
+  #      con resource name "gcp_credentials_json" (el nombre que usa valueFrom abajo).
+  # - name: "GOOGLE_APPLICATION_CREDENTIALS_JSON"
+  #   valueFrom: "gcp_credentials_json"
+
+  # ── LLM alternativo sin cuenta de nube (openai-compat, ver src/service.py) ──
+  # Opcionales: solo hacen falta si en el sidebar se elige OpenRouter o Groq en vez
+  # de Vertex AI. Mismo patrón de secreto que gcp_credentials_json arriba:
+  #   databricks secrets put-secret <scope> openrouter_api_key --string-value "<key>"
+  #   databricks secrets put-secret <scope> groq_api_key --string-value "<key>"
+  # y en App resources → Add resource → Secret, con esos mismos resource names.
+  # - name: "OPENROUTER_API_KEY"
+  #   valueFrom: "openrouter_api_key"
+  # - name: "GROQ_API_KEY"
+  #   valueFrom: "groq_api_key"
+
+  # ── Autenticación de la API (api/security.py) ────────────────────────────────
+  # La interfaz mínima actual NO tiene pantalla de login: para probarla hay que poner
+  # AUTH_ENABLED en "false". Con "true" la API exige sesión y la UI muestra un aviso.
+  # Cuando vuelva el login a la UI, dejar "true" y definir el resto.
+  - name: "AUTH_ENABLED"
+    value: "false"
+  # Con AUTH_ENABLED="true" descomentar estas dos (la segunda exige el secreto "auth_password"):
+  # - name: "AUTH_USERNAME"
+  #   value: "REEMPLAZAR-usuario"
+  # - name: "AUTH_PASSWORD"
+  #   valueFrom: "auth_password"          # App resources → Secret → resource name "auth_password"
+  # La firma HMAC de la cookie de sesión usa AUTH_SECRET_KEY (api/security.py), no
+  # SESSION_SECRET_KEY. Agregarla como secreto cuando AUTH_ENABLED sea "true":
+  #   - name: "AUTH_SECRET_KEY"
+  #     valueFrom: "auth_secret_key"

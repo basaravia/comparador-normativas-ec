@@ -1,0 +1,82 @@
+version: 1
+titulo: "Papel de Trabajo — Evaluación de Cumplimiento Normativo"
+hojas:
+  resumen:
+    nombre: "Resumen"
+    activo: true
+    columnas:
+      - { id: "metrica", etiqueta: "Métrica / Parámetro", ancho: 35 }
+      - { id: "valor", etiqueta: "Valor", ancho: 50 }
+
+  via1_manual:
+    nombre: "Vía 1 — Manual"
+    activo: true
+    columnas:
+      - { id: "jerarquia", etiqueta: "Jerarquía", ancho: 20 }
+      - { id: "titulo_seccion", etiqueta: "Título de Sección", ancho: 35 }
+      - { id: "articulos", etiqueta: "Artículos Aplicables", ancho: 30 }
+      - { id: "normativas", etiqueta: "Normativas", ancho: 25 }
+      - { id: "nivel_cumplimiento", etiqueta: "Nivel Cumplimiento", ancho: 20, formato_nivel: true }
+      - { id: "prioridad", etiqueta: "Prioridad", ancho: 15, formato_prioridad: true }
+      - { id: "analisis_general", etiqueta: "Análisis Comparativo", ancho: 60 }
+      - { id: "brechas", etiqueta: "Brechas Declaradas", ancho: 40 }
+      - { id: "requiere_revision_manual", etiqueta: "Revisión Manual", ancho: 18 }
+      - { id: "motivos_revision", etiqueta: "Motivos Revisión", ancho: 35 }
+
+  via2_normativa:
+    nombre: "Vía 2 — Normativa"
+    activo: true
+    columnas:
+      - { id: "articulo_doc_id", etiqueta: "Normativa", ancho: 25 }
+      - { id: "numero", etiqueta: "Número Artículo", ancho: 18 }
+      - { id: "encabezado", etiqueta: "Epígrafe / Asunto", ancho: 35 }
+      - { id: "cubierto", etiqueta: "Estado Cobertura", ancho: 18 }
+      - { id: "nivel_adopcion", etiqueta: "Nivel Adopción", ancho: 18, formato_nivel: true }
+      - { id: "prioridad", etiqueta: "Prioridad", ancho: 15, formato_prioridad: true }
+      - { id: "secciones_que_lo_cubren", etiqueta: "Secciones que lo cubren", ancho: 40 }
+      - { id: "brechas", etiqueta: "Brechas", ancho: 35 }
+      - { id: "requiere_revision_manual", etiqueta: "Revisión Manual", ancho: 18 }
+      - { id: "motivos_revision", etiqueta: "Motivos Revisión", ancho: 35 }
+
+  matriz_nn:
+    nombre: "Matriz N-N"
+    activo: true
+    columnas:
+      - { id: "articulo_doc_id", etiqueta: "Doc Normativo", ancho: 22 }
+      - { id: "articulo_numero", etiqueta: "Art. Núm", ancho: 12 }
+      - { id: "seccion_doc_id", etiqueta: "Doc Manual", ancho: 22 }
+      - { id: "seccion_jerarquia", etiqueta: "Jerarquía Manual", ancho: 25 }
+      - { id: "origen", etiqueta: "Origen Enlace", ancho: 18 }
+      - { id: "relevante", etiqueta: "Relevante (LLM)", ancho: 16 }
+      - { id: "score_semantico", etiqueta: "Score Semántico", ancho: 16 }
+      - { id: "score_reranker", etiqueta: "Score Reranker", ancho: 16 }
+      - { id: "score_grade", etiqueta: "Score Grading", ancho: 16 }
+      - { id: "nivel_cumplimiento", etiqueta: "Nivel", ancho: 16, formato_nivel: true }
+      - { id: "razon", etiqueta: "Sustento / Razón", ancho: 50 }
+
+  revision_manual:
+    nombre: "Revisión Manual"
+    activo: true
+    columnas:
+      - { id: "tipo_elemento", etiqueta: "Tipo Elemento", ancho: 18 }
+      - { id: "identificador", etiqueta: "Identificador", ancho: 25 }
+      - { id: "descripcion", etiqueta: "Descripción / Título", ancho: 40 }
+      - { id: "motivos_revision", etiqueta: "Motivos de Revisión", ancho: 45 }
+      - { id: "prioridad", etiqueta: "Prioridad Atención", ancho: 18, formato_prioridad: true }
+      - { id: "accion_sugerida", etiqueta: "Acción Sugerida", ancho: 50 }
+
+  trazabilidad:
+    nombre: "Trazabilidad"
+    activo: true
+    columnas:
+      - { id: "parametro", etiqueta: "Parámetro de Auditoría", ancho: 35 }
+      - { id: "detalle", etiqueta: "Detalle / Valor de Configuración", ancho: 55 }
+
+prioridades:
+  omision: "Alta"
+  no_cubierto: "Alta"
+  parcial: "Media"
+  cumple: "Baja"
+  cubierto: "Baja"
+  no_aplica: "Informativa"
+  default: "Media"
