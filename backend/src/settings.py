@@ -5,7 +5,13 @@ declarado en `dependencies/requirements.txt` pero nunca se usa, y `config.py` ll
 endpoints escritos a mano. Mientras todo corra contra un backend local eso no duele; en
 cuanto haya credenciales de por medio, sí.
 
-**Precedencia**, de mayor a menor: `UI > variable de entorno > .env > defaults de config.py`.
+**Precedencia**, de mayor a menor:
+`UI > variable de entorno > .env > secret scope de Databricks > defaults de config.py`.
+
+**Secret scope.** Cualquier variable `X` puede leerse de un secreto de Databricks si el entorno
+(o `.env`) dice DÓNDE está, nunca su valor: `X_SECRET_KEY=<key>` y el scope en `X_SECRET_SCOPE`
+o, para todas, en `DATABRICKS_SECRET_SCOPE`. Se lee con `dbutils.secrets.get` donde exista
+(notebooks, jobs) y con `databricks-sdk` donde no (Databricks Apps, con la identidad de la app).
 La UI gana porque un cambio en el sidebar debe verse en la corrida siguiente sin reiniciar;
 `config.py` pierde porque deja de ser fuente de credenciales y conserva solo defaults no
 sensibles.
@@ -16,6 +22,8 @@ trazabilidad del papel de trabajo.
 """
 from __future__ import annotations
 
+import base64
+import logging
 import os
 import re
 from pathlib import Path
@@ -26,6 +34,12 @@ _RAIZ = Path(__file__).resolve().parent.parent.parent
 _ENV = _RAIZ / ".env"
 
 _cargado = False
+
+logger = logging.getLogger(__name__)
+
+# Valores ya leídos de un secret scope, por variable. Un fallo se guarda como None para no
+# repetir la llamada en cada `get()`.
+_SECRETOS: dict[str, str | None] = {}
 
 
 def cargar_env(ruta: Path | None = None, *, forzar: bool = False) -> bool:
@@ -73,6 +87,8 @@ def get(
         cargar_env()
         valor = os.environ.get(clave)
         if valor is None or valor == "":
+            valor = _desde_secret_scope(clave)
+        if valor is None or valor == "":
             valor = default
 
     if valor is None or cast is None:
@@ -86,9 +102,60 @@ def get(
 
 
 def faltantes(claves: tuple[str, ...]) -> list[str]:
-    """Cuáles de esas variables no están definidas. Para el preflight del ítem 4."""
+    """Cuáles de esas variables no están definidas (ni en el entorno ni en un secret scope)."""
     cargar_env()
-    return [c for c in claves if not os.environ.get(c)]
+    return [c for c in claves if not get(c)]
+
+
+# ── Secret scope de Databricks ────────────────────────────────────────────────
+
+def referencia_secreto(clave: str) -> tuple[str, str] | None:
+    """`(scope, key)` de donde leer `clave`, según `X_SECRET_KEY` / `X_SECRET_SCOPE`.
+
+    Se leen de `os.environ` directamente (no con `get`) para no recursar.
+    """
+    key = (os.environ.get(f"{clave}_SECRET_KEY") or "").strip()
+    if not key:
+        return None
+    scope = (os.environ.get(f"{clave}_SECRET_SCOPE")
+             or os.environ.get("DATABRICKS_SECRET_SCOPE") or "").strip()
+    if not scope:
+        logger.warning("%s_SECRET_KEY está definida pero falta el scope: define %s_SECRET_SCOPE "
+                       "o DATABRICKS_SECRET_SCOPE", clave, clave)
+        return None
+    return scope, key
+
+
+def _leer_secreto(scope: str, key: str) -> str:
+    """Lee un secreto: `dbutils` si existe (notebooks/jobs), si no `databricks-sdk` (Apps)."""
+    try:
+        from pyspark.dbutils import DBUtils
+        from pyspark.sql import SparkSession
+        return DBUtils(SparkSession.builder.getOrCreate()).secrets.get(scope=scope, key=key)
+    except ImportError:
+        pass
+    from databricks.sdk import WorkspaceClient
+
+    respuesta = WorkspaceClient().secrets.get_secret(scope=scope, key=key)
+    return base64.b64decode(respuesta.value or "").decode("utf-8")
+
+
+def _desde_secret_scope(clave: str) -> str | None:
+    if clave in _SECRETOS:
+        return _SECRETOS[clave]
+    ref = referencia_secreto(clave)
+    if ref is None:
+        return None
+    scope, key = ref
+    try:
+        valor = _leer_secreto(scope, key) or None
+    except Exception as e:  # noqa: BLE001 - cualquier fallo del backend de secretos
+        # Se nombra dónde se buscó y el tipo de error; nunca el valor.
+        logger.warning("No se pudo leer %s del secret scope %r (key %r): %s",
+                       clave, scope, key, type(e).__name__)
+        valor = None
+    _SECRETOS[clave] = valor
+    return valor
 
 
 # ── Redacción ─────────────────────────────────────────────────────────────────
@@ -141,6 +208,10 @@ def redact(valor: Any) -> Any:
         return valor
 
     texto = valor
+    # Los valores leídos de un secret scope se ocultan literalmente, tengan el formato que tengan.
+    for secreto in _SECRETOS.values():
+        if secreto and len(secreto) >= 4:
+            texto = texto.replace(secreto, _MASCARA)
     for patron in _PATRONES_VALOR:
         texto = patron.sub(_MASCARA, texto)
     texto = _PATRON_ASIGNACION.sub(lambda m: f"{m.group(1)}{m.group(2)}{_MASCARA}", texto)
