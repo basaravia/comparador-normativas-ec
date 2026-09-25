@@ -70,12 +70,12 @@ pip install --extra-index-url https://download.pytorch.org/whl/cpu -r backend/re
 - **Configuración, como recomienda Databricks:** todo en `app.yaml`. Los parámetros no
   sensibles como `value` y los secretos como **recurso de la app + `valueFrom`**; nunca el valor
   en el archivo. El `.env` es solo para desarrollo local. Pasos:
-  1. Crear dos secretos en un scope: `foundry_ai_token` (la clave) y `foundry_ai_endpoint`
-     (la URL; va como secreto porque nombra tu recurso de Azure y el repo es público).
-  2. En la app: *App resources* → *Add resource* → **Secret** para cada uno, con esos mismos
-     *resource names*, permiso de lectura.
-  3. En `app.yaml`, sustituir los `REEMPLAZAR-*` de `FOUNDRY_AI_API_VERSION`,
-     `FOUNDRY_AI_DEPLOYMENT` y `FOUNDRY_AI_EMBED_DEPLOYMENT`.
+  1. El único secreto es el token de Foundry. En la app: *App resources* → *Add resource* →
+     **Secret** → tu scope y key, permiso **Can read**, clave de recurso **`foundry_ai_token`**
+     (tiene que coincidir con el `valueFrom` de `app.yaml`).
+  2. En `app.yaml`, sustituir los `REEMPLAZAR-*` de `FOUNDRY_AI_ENDPOINT`,
+     `FOUNDRY_AI_API_VERSION`, `FOUNDRY_AI_DEPLOYMENT` y `FOUNDRY_AI_EMBED_DEPLOYMENT`. No son
+     secretos; ojo: si la rama de deploy se publica en un repo público, el endpoint quedará visible.
 
   Leer secretos con `dbutils`/`databricks-sdk` (`DATABRICKS_SECRET_SCOPE_<NOMBRE>` /
   `DATABRICKS_SECRET_KEY_<NOMBRE>`) sigue soportado para notebooks, jobs u otros entornos, pero en
