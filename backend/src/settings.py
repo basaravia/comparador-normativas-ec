@@ -9,8 +9,9 @@ cuanto haya credenciales de por medio, sí.
 `UI > variable de entorno > .env > secret scope de Databricks > defaults de config.py`.
 
 **Secret scope.** Cualquier variable `X` puede leerse de un secreto de Databricks si el entorno
-(o `.env`) dice DÓNDE está, nunca su valor: `X_SECRET_KEY=<key>` y el scope en `X_SECRET_SCOPE`
-o, para todas, en `DATABRICKS_SECRET_SCOPE`. Se lee con `dbutils.secrets.get` donde exista
+(o `.env`) dice DÓNDE está, nunca su valor: `DATABRICKS_SECRET_KEY_<NOMBRE>=<key>` y
+`DATABRICKS_SECRET_SCOPE_<NOMBRE>=<scope>` (o `DATABRICKS_SECRET_SCOPE` común a todas). `<NOMBRE>`
+es `X` o su forma corta sin `_AI` (`FOUNDRY_AI_TOKEN` → `FOUNDRY_TOKEN`). Se lee con `dbutils.secrets.get` donde exista
 (notebooks, jobs) y con `databricks-sdk` donde no (Databricks Apps, con la identidad de la app).
 La UI gana porque un cambio en el sidebar debe verse en la corrida siguiente sin reiniciar;
 `config.py` pierde porque deja de ser fuente de credenciales y conserva solo defaults no
@@ -109,21 +110,32 @@ def faltantes(claves: tuple[str, ...]) -> list[str]:
 
 # ── Secret scope de Databricks ────────────────────────────────────────────────
 
+def _nombres_referencia(clave: str) -> list[str]:
+    """Sufijos aceptados para `clave`: el nombre completo y la forma corta sin `_AI`."""
+    nombres = [clave]
+    corto = clave.replace("_AI_", "_")
+    if corto != clave:
+        nombres.append(corto)
+    return nombres
+
+
 def referencia_secreto(clave: str) -> tuple[str, str] | None:
-    """`(scope, key)` de donde leer `clave`, según `X_SECRET_KEY` / `X_SECRET_SCOPE`.
+    """`(scope, key)` de donde leer `clave`, según `DATABRICKS_SECRET_{KEY,SCOPE}_<NOMBRE>`.
 
     Se leen de `os.environ` directamente (no con `get`) para no recursar.
     """
-    key = (os.environ.get(f"{clave}_SECRET_KEY") or "").strip()
-    if not key:
-        return None
-    scope = (os.environ.get(f"{clave}_SECRET_SCOPE")
-             or os.environ.get("DATABRICKS_SECRET_SCOPE") or "").strip()
-    if not scope:
-        logger.warning("%s_SECRET_KEY está definida pero falta el scope: define %s_SECRET_SCOPE "
-                       "o DATABRICKS_SECRET_SCOPE", clave, clave)
-        return None
-    return scope, key
+    for nombre in _nombres_referencia(clave):
+        key = (os.environ.get(f"DATABRICKS_SECRET_KEY_{nombre}") or "").strip()
+        if not key:
+            continue
+        scope = (os.environ.get(f"DATABRICKS_SECRET_SCOPE_{nombre}")
+                 or os.environ.get("DATABRICKS_SECRET_SCOPE") or "").strip()
+        if not scope:
+            logger.warning("DATABRICKS_SECRET_KEY_%s está definida pero falta el scope: define "
+                           "DATABRICKS_SECRET_SCOPE_%s o DATABRICKS_SECRET_SCOPE", nombre, nombre)
+            return None
+        return scope, key
+    return None
 
 
 def _leer_secreto(scope: str, key: str) -> str:

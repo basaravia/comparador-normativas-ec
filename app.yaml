@@ -32,9 +32,9 @@ env:
     valueFrom: "foundry_ai_token"
   # Alternativa sin App resources: leer el token de un secret scope con databricks-sdk.
   # Quita el `valueFrom` de arriba y descomenta (solo nombres; el SP de la app necesita READ):
-  # - name: "DATABRICKS_SECRET_SCOPE"
+  # - name: "DATABRICKS_SECRET_SCOPE_FOUNDRY_TOKEN"
   #   value: "REEMPLAZAR-nombre-del-scope"
-  # - name: "FOUNDRY_AI_TOKEN_SECRET_KEY"
+  # - name: "DATABRICKS_SECRET_KEY_FOUNDRY_TOKEN"
   #   value: "REEMPLAZAR-nombre-de-la-key"
   - name: "FOUNDRY_AI_API_VERSION"
     value: "REEMPLAZAR-2024-10-21"
