@@ -25,7 +25,8 @@ En Databricks: *Create app* → fuente **Git** → repo `comparador-normativas-e
 | El puerto lo asigna la plataforma y el `command` **no pasa por shell** (nada se sustituye en él) | `app.yaml` no pasa `--host`/`--port`: uvicorn lee `UVICORN_HOST`/`UVICORN_PORT`, que Databricks define. Un `--port DATABRICKS_APP_PORT` llegó literal y tumbó la app |
 | Por defecto 2 vCPU y **6 GB** de memoria | Pico medido en el E2E: **4,2 GB** (Docling + reranker + FAISS). Cabe, con poco margen |
 | El front no se compila en la app si no hay `package.json` | `frontend/dist` ya compilado en la rama |
-| Solo existe lo que está en la rama | Van los PDF **versionados** (normativas públicas + manuales MOCK) y la caché de Docling: sin ellos la app lista 0 documentos y la UI mínima no puede subirlos |
+| Solo existe lo que está en la rama | Van los PDF **versionados de ≤ 1 MB** (5 normativas cortas + manuales MOCK), para que la app tenga con qué probar |
+| Límite de tamaño: la app no puede pasar de **10 MB** | El paquete pesa ~1,7 MB. Los PDF grandes y los documentos reales van en un **volumen de Unity Catalog**, no en la app |
 
 ### Prueba end-to-end hecha antes de publicar
 

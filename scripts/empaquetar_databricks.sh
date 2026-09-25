@@ -23,11 +23,14 @@ cp -r frontend/dist "$OUT/frontend/dist"
 # Solo el placeholder de marca; la identidad real (assets/brand/brand.json) no viaja en git.
 cp -r assets/brand/_placeholder "$OUT/assets/brand/_placeholder"
 
-# Documentos de prueba: SOLO los versionados en git (normativas públicas, manuales MOCK y la caché
-# de Docling de las normativas). `git ls-files` evita copiar manuales reales que existan en disco
-# sin versionar. Sin ellos la app desplegada lista 0 documentos y la UI mínima no puede subirlos.
-git ls-files -z Normativa2026 'document_test/*.pdf' output/docling/'*.md' \
-  | xargs -0 -I{} install -D -m 0644 {} "$OUT/{}"
+# Documentos de prueba: SOLO los versionados en git y de ≤ 1 MB (normativas cortas y manuales MOCK).
+# Databricks Apps rechaza apps de más de 10 MB: los PDF grandes y cualquier documento real van en
+# un volumen de Unity Catalog, no en la app (ver docs/DEPLOY-DATABRICKS.md). `git ls-files` evita
+# copiar manuales reales que existan en disco sin versionar.
+MAX_BYTES=$((1024 * 1024))
+git ls-files -z Normativa2026 'document_test/*.pdf' | while IFS= read -r -d '' f; do
+  if [ "$(stat -c %s "$f")" -le "$MAX_BYTES" ]; then install -D -m 0644 "$f" "$OUT/$f"; fi
+done
 
 echo "✔ $OUT listo ($(du -sh "$OUT" | cut -f1)). Contenido:"
 (cd "$OUT" && find . -maxdepth 2 -not -path './backend/*/*' | sort | head -30)
