@@ -21,22 +21,18 @@ env:
   # ── Azure AI Foundry (LLM + embeddings) — backend activo ─────────────────────
   # Patrón recomendado por Databricks: parámetros no sensibles con `value`, secretos como
   # recurso de la app con `valueFrom` (nunca el valor en este archivo, que es público).
-  # Crear los secretos una vez y asociarlos en la app: App resources → Add resource → Secret,
-  # con el resource name indicado en cada `valueFrom`:
-  #   databricks secrets put-secret <scope> foundry_ai_token    --string-value "<clave>"
-  #   databricks secrets put-secret <scope> foundry_ai_endpoint --string-value "https://<recurso>.openai.azure.com"
-  # El endpoint va como recurso aunque no sea una credencial: lleva el nombre de tu recurso de
-  # Azure y este repo es público.
+  # Único secreto: el token. Se asocia en la app: App resources → Add resource → Secret
+  # (tu scope y key), permiso "Can read", clave de recurso "foundry_ai_token" (= el valueFrom).
   #
   # Perfil de modelos (backend/config/perfiles.yaml): foundry | default | local | local_groq |
   # personalizado. Para forzar un solo eje: LLM_BACKEND / EMBED_BACKEND.
   - name: "MODEL_PROFILE"
     value: "foundry"
-  - name: "FOUNDRY_AI_ENDPOINT"
-    valueFrom: "foundry_ai_endpoint"
   - name: "FOUNDRY_AI_TOKEN"
     valueFrom: "foundry_ai_token"
-  # No sensibles: sustituir los REEMPLAZAR-* por la api-version y los nombres de deployment.
+  # No sensibles: sustituir los REEMPLAZAR-* por el endpoint, la api-version y los deployments.
+  - name: "FOUNDRY_AI_ENDPOINT"
+    value: "REEMPLAZAR-https://<recurso>.openai.azure.com"
   - name: "FOUNDRY_AI_API_VERSION"
     value: "REEMPLAZAR-2024-10-21"
   - name: "FOUNDRY_AI_DEPLOYMENT"
